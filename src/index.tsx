@@ -2622,12 +2622,21 @@ app.get('/', (c) => {
             } else {
               console.log('✅ mlFuturePriceChart element found')
             }
-            const mlFuturePriceCtx = mlFuturePriceElement.getContext('2d')
-            const futurePred = trainingData.future_predictions
+            
+            try {
+              const mlFuturePriceCtx = mlFuturePriceElement.getContext('2d')
+              const futurePred = trainingData.future_predictions
             
             // 過去30日のデータ（予測の backfit から）
             const historicalDates = data.prediction.backfit ? data.prediction.backfit.dates.slice(-30) : []
-            const historicalPrices = data.prediction.backfit ? data.prediction.backfit.actual.slice(-30) : []
+            const historicalPrices = data.prediction.backfit ? data.prediction.backfit.actualPrices.slice(-30) : []
+            
+            console.log('ML future chart data:', {
+              historicalDates: historicalDates.length,
+              historicalPrices: historicalPrices.length,
+              futureDates: futurePred.dates.length,
+              futurePredictions: futurePred.predictions.length
+            })
             
             // 全体のラベル: 過去30日 + 未来30日
             const allLabels = [...historicalDates, ...futurePred.dates]
@@ -2740,6 +2749,11 @@ app.get('/', (c) => {
                 }
               }
             })
+            
+            console.log('✅ ML future price chart created successfully')
+            } catch (error) {
+              console.error('❌ ERROR creating ML future price chart:', error)
+            }
           }
         }
 
@@ -2757,17 +2771,25 @@ app.get('/', (c) => {
           } else {
             console.log('✅ predictionComparisonChart element found')
           }
-          const comparisonCtx = comparisonElement.getContext('2d')
           
-          // 統計予測の方向性（BUY=上昇、SELL=下降、HOLD=横ばい）
-          const statDirection = data.prediction.action
-          const statPredictedPrice = statDirection === 'BUY' 
-            ? data.current_price * 1.05 
-            : statDirection === 'SELL' 
-            ? data.current_price * 0.95 
-            : data.current_price
-          
-          new Chart(comparisonCtx, {
+          try {
+            const comparisonCtx = comparisonElement.getContext('2d')
+            
+            // 統計予測の方向性（BUY=上昇、SELL=下降、HOLD=横ばい）
+            const statDirection = data.prediction.action
+            const statPredictedPrice = statDirection === 'BUY' 
+              ? data.current_price * 1.05 
+              : statDirection === 'SELL' 
+              ? data.current_price * 0.95 
+              : data.current_price
+            
+            console.log('Creating comparison chart with data:', {
+              currentPrice: data.current_price,
+              statPredictedPrice,
+              mlPredictedPrice: data.prediction.ml_prediction.predicted_price
+            })
+            
+            new Chart(comparisonCtx, {
             type: 'bar',
             data: {
               labels: ['現在価格', '統計予測', 'ML予測'],
@@ -2812,6 +2834,11 @@ app.get('/', (c) => {
               }
             }
           })
+          
+          console.log('✅ Prediction comparison chart created successfully')
+          } catch (error) {
+            console.error('❌ ERROR creating prediction comparison chart:', error)
+          }
         }
 
         // スコアカードにイベントリスナーを追加(DOM完全レンダリング後に実行)
