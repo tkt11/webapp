@@ -462,6 +462,31 @@ app.get('/', (c) => {
           <i class="fas fa-info-circle mr-1"></i>
           人気銘柄: AAPL (Apple), TSLA (Tesla), MSFT (Microsoft), NVDA (NVIDIA), GOOGL (Google)
         </p>
+        
+        <!-- オンデマンド学習チェックボックス -->
+        <div class="mt-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-2 border-purple-300 rounded-lg p-4">
+          <div class="flex items-start gap-3">
+            <input 
+              type="checkbox" 
+              id="train-model-checkbox" 
+              class="mt-1 w-5 h-5 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+            />
+            <div class="flex-1">
+              <label for="train-model-checkbox" class="font-semibold text-gray-800 cursor-pointer">
+                <i class="fas fa-brain text-purple-600"></i>
+                このモデルを学習する（オンデマンド学習）
+              </label>
+              <p class="text-sm text-gray-600 mt-1">
+                チェックすると、この銘柄専用のMLモデルを学習してから予測します。
+                学習には約10-30秒かかりますが、より高精度な予測が可能です。
+              </p>
+              <p class="text-xs text-gray-500 mt-2">
+                <i class="fas fa-info-circle mr-1"></i>
+                学習結果は7日間キャッシュされ、次回の予測で再利用されます
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div id="analysis-loading" style="display:none;">
@@ -1105,11 +1130,26 @@ app.get('/', (c) => {
         return
       }
 
+      // チェックボックスから学習フラグを取得
+      const trainModel = document.getElementById('train-model-checkbox').checked
+      console.log('Train model:', trainModel)
+
+      // 動的ローディングメッセージ
+      const loadingDiv = document.getElementById('analysis-loading')
+      const loadingMessage = trainModel 
+        ? '分析中... モデル学習を実行しています（約10-30秒）'
+        : '分析中... GPT-4oで詳細分析を実行しています'
+      
+      loadingDiv.innerHTML = \`
+        <div class="loader"></div>
+        <p class="text-center text-gray-600">\${loadingMessage}</p>
+      \`
+
       document.getElementById('analysis-loading').style.display = 'block'
       document.getElementById('analysis-result').style.display = 'none'
 
       try {
-        const response = await axios.post('/api/analyze', { symbol })
+        const response = await axios.post('/api/analyze', { symbol, trainModel })
         const data = response.data
         
         // グローバルに保存してモーダルから参照可能にする
