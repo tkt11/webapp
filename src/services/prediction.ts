@@ -7,7 +7,12 @@ import type {
   AnalystRating 
 } from '../types'
 import OpenAI from 'openai'
-import { predictWithML, type MLPredictionResponse } from './ml-prediction'
+import { 
+  predictWithML, 
+  trainMLModel,
+  type MLPredictionResponse, 
+  type MLTrainingResponse 
+} from './ml-prediction'
 
 export function generatePrediction(
   technical: TechnicalAnalysis,
@@ -449,9 +454,29 @@ export async function generateMLPrediction(
   historicalPrices: number[],
   technical: TechnicalAnalysis,
   fundamental: FundamentalAnalysis,
-  sentiment: SentimentAnalysis
-): Promise<MLPredictionResponse | null> {
+  sentiment: SentimentAnalysis,
+  trainModel: boolean = false
+): Promise<{ prediction: MLPredictionResponse | null; training: MLTrainingResponse | null }> {
   try {
+    let trainingResult: MLTrainingResponse | null = null;
+
+    // 学習フラグがONの場合、モデルを学習
+    if (trainModel) {
+      console.log(`Training custom model for ${symbol}...`);
+      trainingResult = await trainMLModel(
+        symbol,
+        historicalPrices,
+        technical,
+        fundamental,
+        sentiment.score
+      );
+      
+      if (!trainingResult) {
+        console.error('Training failed, falling back to generic model');
+      }
+    }
+
+    // 予測実行
     const mlResult = await predictWithML(
       symbol,
       historicalPrices,
@@ -504,10 +529,16 @@ export async function generateMLPrediction(
       }
     }
     
-    return mlResult
+    return {
+      prediction: mlResult,
+      training: trainingResult
+    };
   } catch (error) {
     console.error('ML prediction error:', error)
-    return null
+    return {
+      prediction: null,
+      training: null
+    };
   }
 }
 

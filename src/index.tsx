@@ -108,12 +108,13 @@ app.post('/api/analyze', async (c) => {
     )
     
     // ML予測を生成（並行表示用）
-    const mlPrediction = await generateMLPrediction(
+    const mlResult = await generateMLPrediction(
       symbol,
       stockData.prices,
       technical,
       fundamental,
-      sentiment
+      sentiment,
+      trainModel  // 学習フラグを渡す
     )
     
     return c.json({
@@ -124,7 +125,8 @@ app.post('/api/analyze', async (c) => {
         detailed_explanation: detailedExplanation,
         future: futurePrediction,
         backfit: backfitPrediction,
-        ml_prediction: mlPrediction  // ML予測を追加
+        ml_prediction: mlResult.prediction,  // ML予測
+        ml_training: mlResult.training        // 学習結果（存在する場合）
       },
       analysis: {
         technical,
@@ -1717,6 +1719,235 @@ app.get('/', (c) => {
             </div>
             \` : ''}
 
+            <!-- オンデマンド学習結果（学習が実行された場合のみ表示） -->
+            \${data.prediction.ml_training ? \`
+            <div class="bg-gradient-to-r from-purple-50 to-pink-50 p-6 rounded-lg mb-6 border-2 border-purple-300">
+              <div class="bg-gradient-to-r from-purple-600 to-pink-600 text-white p-4 rounded-lg mb-4">
+                <h4 class="font-bold text-2xl text-center">
+                  <i class="fas fa-graduation-cap mr-2"></i>オンデマンド学習結果
+                </h4>
+                <p class="text-center text-purple-100 mt-2">
+                  \${data.symbol}専用MLモデルを学習しました
+                </p>
+              </div>
+
+              <!-- 学習サマリー -->
+              <div class="grid grid-cols-4 gap-4 mb-6">
+                <div class="bg-white p-4 rounded-lg shadow">
+                  <p class="text-xs text-gray-600 mb-1">モデルID</p>
+                  <p class="text-sm font-bold text-purple-700 truncate" title="\${data.prediction.ml_training.model_id}">
+                    \${data.prediction.ml_training.model_id}
+                  </p>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow">
+                  <p class="text-xs text-gray-600 mb-1">学習時間</p>
+                  <p class="text-2xl font-bold text-purple-700">
+                    \${data.prediction.ml_training.training_duration.toFixed(1)}秒
+                  </p>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow">
+                  <p class="text-xs text-gray-600 mb-1">学習サンプル数</p>
+                  <p class="text-2xl font-bold text-purple-700">
+                    \${data.prediction.ml_training.training_data.train_samples}
+                  </p>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow">
+                  <p class="text-xs text-gray-600 mb-1">テストサンプル数</p>
+                  <p class="text-2xl font-bold text-purple-700">
+                    \${data.prediction.ml_training.training_data.test_samples}
+                  </p>
+                </div>
+              </div>
+
+              <!-- 学習データ詳細 -->
+              <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+                <h5 class="font-bold text-lg text-gray-800 mb-4">
+                  <i class="fas fa-database mr-2"></i>学習データ詳細
+                </h5>
+                <div class="grid grid-cols-2 gap-4">
+                  <div class="space-y-2">
+                    <div class="flex justify-between">
+                      <span class="text-gray-600">総サンプル数:</span>
+                      <span class="font-bold">\${data.prediction.ml_training.training_data.total_samples}</span>
+                    </div>
+                    <div class="flex justify-between">
+                      <span class="text-gray-600">学習セット:</span>
+                      <span class="font-bold text-blue-600">\${data.prediction.ml_training.training_data.train_samples}</span>
+                    </div>
+                    <div class="flex justify-between">
+                      <span class="text-gray-600">テストセット:</span>
+                      <span class="font-bold text-green-600">\${data.prediction.ml_training.training_data.test_samples}</span>
+                    </div>
+                  </div>
+                  <div class="space-y-2">
+                    <div class="flex justify-between">
+                      <span class="text-gray-600">特徴量数:</span>
+                      <span class="font-bold">\${data.prediction.ml_training.training_data.features_count}</span>
+                    </div>
+                    <div class="flex justify-between">
+                      <span class="text-gray-600">分割比率:</span>
+                      <span class="font-bold">80% / 20%</span>
+                    </div>
+                    <div class="flex justify-between">
+                      <span class="text-gray-600">学習時刻:</span>
+                      <span class="font-bold text-xs">\${new Date(data.prediction.ml_training.timestamp).toLocaleString('ja-JP', {timeZone: 'Asia/Tokyo'})}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ハイパーパラメータ -->
+              <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+                <h5 class="font-bold text-lg text-gray-800 mb-4">
+                  <i class="fas fa-cog mr-2"></i>ハイパーパラメータ
+                </h5>
+                <div class="grid grid-cols-3 gap-4">
+                  <div class="bg-gray-50 p-3 rounded">
+                    <p class="text-xs text-gray-600 mb-1">目的関数</p>
+                    <p class="font-bold text-gray-800">\${data.prediction.ml_training.hyperparameters.objective}</p>
+                  </div>
+                  <div class="bg-gray-50 p-3 rounded">
+                    <p class="text-xs text-gray-600 mb-1">ブースティング</p>
+                    <p class="font-bold text-gray-800">\${data.prediction.ml_training.hyperparameters.boosting_type}</p>
+                  </div>
+                  <div class="bg-gray-50 p-3 rounded">
+                    <p class="text-xs text-gray-600 mb-1">葉数</p>
+                    <p class="font-bold text-gray-800">\${data.prediction.ml_training.hyperparameters.num_leaves}</p>
+                  </div>
+                  <div class="bg-gray-50 p-3 rounded">
+                    <p class="text-xs text-gray-600 mb-1">学習率</p>
+                    <p class="font-bold text-gray-800">\${data.prediction.ml_training.hyperparameters.learning_rate}</p>
+                  </div>
+                  <div class="bg-gray-50 p-3 rounded">
+                    <p class="text-xs text-gray-600 mb-1">最大深度</p>
+                    <p class="font-bold text-gray-800">\${data.prediction.ml_training.hyperparameters.max_depth}</p>
+                  </div>
+                  <div class="bg-gray-50 p-3 rounded">
+                    <p class="text-xs text-gray-600 mb-1">最小葉データ数</p>
+                    <p class="font-bold text-gray-800">\${data.prediction.ml_training.hyperparameters.min_data_in_leaf}</p>
+                  </div>
+                  <div class="bg-gray-50 p-3 rounded">
+                    <p class="text-xs text-gray-600 mb-1">特徴量選択率</p>
+                    <p class="font-bold text-gray-800">\${data.prediction.ml_training.hyperparameters.feature_fraction}</p>
+                  </div>
+                  <div class="bg-gray-50 p-3 rounded">
+                    <p class="text-xs text-gray-600 mb-1">バギング率</p>
+                    <p class="font-bold text-gray-800">\${data.prediction.ml_training.hyperparameters.bagging_fraction}</p>
+                  </div>
+                  <div class="bg-gray-50 p-3 rounded">
+                    <p class="text-xs text-gray-600 mb-1">ラウンド数</p>
+                    <p class="font-bold text-gray-800">\${data.prediction.ml_training.hyperparameters.num_boost_round}</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 学習曲線 -->
+              <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+                <h5 class="font-bold text-lg text-gray-800 mb-4">
+                  <i class="fas fa-chart-line mr-2"></i>学習曲線（Train/Validation Loss）
+                </h5>
+                <canvas id="learningCurveChart" style="max-height: 300px;"></canvas>
+                <p class="text-xs text-gray-600 mt-3 text-center">
+                  <i class="fas fa-info-circle mr-1"></i>
+                  青線: 学習セット損失 | 赤線: 検証セット損失 | 損失が低いほど高精度
+                </p>
+              </div>
+
+              <!-- 性能指標 -->
+              <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+                <h5 class="font-bold text-lg text-gray-800 mb-4">
+                  <i class="fas fa-chart-bar mr-2"></i>性能指標（Train vs Test）
+                </h5>
+                
+                <div class="grid grid-cols-3 gap-6 mb-4">
+                  <!-- RMSE -->
+                  <div class="text-center">
+                    <p class="text-sm text-gray-600 mb-2">RMSE（二乗平均平方根誤差）</p>
+                    <div class="flex justify-center gap-6">
+                      <div class="bg-blue-50 p-3 rounded">
+                        <p class="text-xs text-gray-600 mb-1">Train</p>
+                        <p class="text-xl font-bold text-blue-600">$\${data.prediction.ml_training.performance_metrics.train_rmse.toFixed(2)}</p>
+                      </div>
+                      <div class="bg-green-50 p-3 rounded">
+                        <p class="text-xs text-gray-600 mb-1">Test</p>
+                        <p class="text-xl font-bold text-green-600">$\${data.prediction.ml_training.performance_metrics.test_rmse.toFixed(2)}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- MAE -->
+                  <div class="text-center">
+                    <p class="text-sm text-gray-600 mb-2">MAE（平均絶対誤差）</p>
+                    <div class="flex justify-center gap-6">
+                      <div class="bg-blue-50 p-3 rounded">
+                        <p class="text-xs text-gray-600 mb-1">Train</p>
+                        <p class="text-xl font-bold text-blue-600">$\${data.prediction.ml_training.performance_metrics.train_mae.toFixed(2)}</p>
+                      </div>
+                      <div class="bg-green-50 p-3 rounded">
+                        <p class="text-xs text-gray-600 mb-1">Test</p>
+                        <p class="text-xl font-bold text-green-600">$\${data.prediction.ml_training.performance_metrics.test_mae.toFixed(2)}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- R² Score -->
+                  <div class="text-center">
+                    <p class="text-sm text-gray-600 mb-2">R²スコア（決定係数）</p>
+                    <div class="flex justify-center gap-6">
+                      <div class="bg-blue-50 p-3 rounded">
+                        <p class="text-xs text-gray-600 mb-1">Train</p>
+                        <p class="text-xl font-bold text-blue-600">\${data.prediction.ml_training.performance_metrics.train_r2.toFixed(4)}</p>
+                      </div>
+                      <div class="bg-green-50 p-3 rounded">
+                        <p class="text-xs text-gray-600 mb-1">Test</p>
+                        <p class="text-xl font-bold text-green-600">\${data.prediction.ml_training.performance_metrics.test_r2.toFixed(4)}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 汎化ギャップ -->
+                <div class="bg-\${Math.abs(data.prediction.ml_training.performance_metrics.generalization_gap) < 2 ? 'green' : Math.abs(data.prediction.ml_training.performance_metrics.generalization_gap) < 5 ? 'yellow' : 'red'}-50 p-4 rounded-lg text-center">
+                  <p class="text-sm text-gray-700 mb-2">
+                    <i class="fas fa-exchange-alt mr-1"></i>汎化ギャップ（Test RMSE - Train RMSE）
+                  </p>
+                  <p class="text-3xl font-bold text-\${Math.abs(data.prediction.ml_training.performance_metrics.generalization_gap) < 2 ? 'green' : Math.abs(data.prediction.ml_training.performance_metrics.generalization_gap) < 5 ? 'yellow' : 'red'}-600">
+                    $\${data.prediction.ml_training.performance_metrics.generalization_gap.toFixed(2)}
+                  </p>
+                  <p class="text-xs text-gray-600 mt-2">
+                    \${Math.abs(data.prediction.ml_training.performance_metrics.generalization_gap) < 2 
+                      ? '✅ 優秀: 過学習なく汎化性能が高い' 
+                      : Math.abs(data.prediction.ml_training.performance_metrics.generalization_gap) < 5 
+                      ? '⚠️ 注意: 若干の過学習の可能性' 
+                      : '❌ 過学習: 学習データへの過適応が見られる'}
+                  </p>
+                </div>
+              </div>
+
+              <!-- 特徴量重要度 -->
+              <div class="bg-white p-6 rounded-lg shadow-lg">
+                <h5 class="font-bold text-lg text-gray-800 mb-4">
+                  <i class="fas fa-list-ol mr-2"></i>特徴量重要度ランキング（Top 10）
+                </h5>
+                <canvas id="featureImportanceTrainingChart" style="max-height: 350px;"></canvas>
+                <p class="text-xs text-gray-600 mt-3 text-center">
+                  <i class="fas fa-info-circle mr-1"></i>
+                  モデルが予測に最も重視した特徴量（Gain-based）
+                </p>
+              </div>
+
+              <!-- 学習成功メッセージ -->
+              <div class="mt-6 bg-green-50 border-2 border-green-300 p-4 rounded-lg text-center">
+                <p class="text-lg font-bold text-green-700">
+                  <i class="fas fa-check-circle mr-2"></i>\${data.prediction.ml_training.message}
+                </p>
+                <p class="text-sm text-gray-600 mt-2">
+                  学習されたモデルは7日間キャッシュされ、今後の予測に使用されます
+                </p>
+              </div>
+            </div>
+            \` : ''}
+
             <!-- 信頼度基準ガイド -->
             <div class="bg-gradient-to-r from-gray-50 to-blue-50 p-6 rounded-lg mb-6">
               <h4 class="font-bold text-xl mb-4 text-center"><i class="fas fa-shield-alt mr-2"></i>信頼度基準ガイド</h4>
@@ -2155,6 +2386,121 @@ app.get('/', (c) => {
           })
         }
         
+        // 学習曲線チャート（学習が実行された場合のみ）
+        if (data.prediction.ml_training) {
+          const learningCurveCtx = document.getElementById('learningCurveChart').getContext('2d')
+          const trainingData = data.prediction.ml_training
+          
+          new Chart(learningCurveCtx, {
+            type: 'line',
+            data: {
+              labels: trainingData.learning_curves.iterations,
+              datasets: [
+                {
+                  label: 'Train Loss (RMSE)',
+                  data: trainingData.learning_curves.train_loss,
+                  borderColor: 'rgb(59, 130, 246)',
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                  borderWidth: 2,
+                  tension: 0.3,
+                  fill: false,
+                  pointRadius: 0
+                },
+                {
+                  label: 'Validation Loss (RMSE)',
+                  data: trainingData.learning_curves.val_loss,
+                  borderColor: 'rgb(239, 68, 68)',
+                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                  borderWidth: 2,
+                  tension: 0.3,
+                  fill: false,
+                  pointRadius: 0
+                }
+              ]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              interaction: {
+                mode: 'index',
+                intersect: false
+              },
+              plugins: {
+                legend: {
+                  display: true,
+                  position: 'top'
+                },
+                tooltip: {
+                  callbacks: {
+                    label: function(context) {
+                      return context.dataset.label + ': $' + context.parsed.y.toFixed(2)
+                    }
+                  }
+                }
+              },
+              scales: {
+                y: {
+                  beginAtZero: false,
+                  title: {
+                    display: true,
+                    text: 'RMSE Loss (USD)'
+                  }
+                },
+                x: {
+                  title: {
+                    display: true,
+                    text: 'Iteration'
+                  }
+                }
+              }
+            }
+          })
+
+          // 特徴量重要度チャート（学習結果用）
+          const featureImportanceTrainingCtx = document.getElementById('featureImportanceTrainingChart').getContext('2d')
+          const topFeatures = trainingData.feature_importances.slice(0, 10)
+          
+          // 最大重要度で正規化
+          const maxImportance = Math.max(...topFeatures.map(f => f.importance))
+          
+          new Chart(featureImportanceTrainingCtx, {
+            type: 'bar',
+            data: {
+              labels: topFeatures.map(f => f.feature),
+              datasets: [{
+                label: 'Importance (Gain)',
+                data: topFeatures.map(f => (f.importance / maxImportance) * 100),
+                backgroundColor: 'rgba(147, 51, 234, 0.6)',
+                borderColor: 'rgb(147, 51, 234)',
+                borderWidth: 1
+              }]
+            },
+            options: {
+              indexAxis: 'y',
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  callbacks: {
+                    label: function(context) {
+                      const actualImportance = topFeatures[context.dataIndex].importance
+                      return 'Gain: ' + actualImportance.toFixed(0) + ' (' + context.parsed.x.toFixed(1) + '%)'
+                    }
+                  }
+                }
+              },
+              scales: {
+                x: {
+                  beginAtZero: true,
+                  max: 100,
+                  title: { display: true, text: '相対重要度 (%)' }
+                }
+              }
+            }
+          })
+        }
+
         // ML予測: 予測比較チャート
         if (data.prediction.ml_prediction) {
           const comparisonCtx = document.getElementById('predictionComparisonChart').getContext('2d')
