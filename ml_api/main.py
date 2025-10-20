@@ -539,9 +539,11 @@ async def train_model(request: Request, data: PredictionRequest):
         
         # 過去50日の価格履歴を保持（移動平均計算用）
         price_history = list(prices[-50:])
+        last_price = prices[-1]  # 最後の実際の価格
         
         # 履歴データのボラティリティを計算
-        price_changes = np.diff(prices[-30:]) / prices[-31:-1]
+        recent_prices = prices[-31:]  # 過去31日の価格（30個の差分計算のため）
+        price_changes = np.diff(recent_prices) / recent_prices[:-1]
         historical_volatility = np.std(price_changes)
         
         print(f"   Historical volatility: {historical_volatility:.4f}")
@@ -572,8 +574,9 @@ async def train_model(request: Request, data: PredictionRequest):
             last_features[4] = np.mean(price_history[-50:])  # sma_50
             
             # ボラティリティ（過去20日）
-            if len(price_history) >= 20:
-                recent_returns = np.diff(price_history[-20:]) / price_history[-21:-1]
+            if len(price_history) >= 21:
+                recent_20 = price_history[-21:]  # 過去21日（20個の差分計算のため）
+                recent_returns = np.diff(recent_20) / np.array(recent_20[:-1])
                 last_features[5] = np.std(recent_returns)  # volatility_20
             
             # モメンタム（過去10日の変化率）
