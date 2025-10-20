@@ -24,6 +24,23 @@ export interface MLPredictionResponse {
   model: string;
   features_used: number;
   timestamp: string;
+  // 追加: ML学習詳細情報
+  feature_importances?: {
+    feature: string;
+    importance: number;
+  }[];
+  model_metrics?: {
+    mae: number;
+    rmse: number;
+    r2_score: number;
+    training_samples: number;
+  };
+  training_info?: {
+    data_start_date: string;
+    data_end_date: string;
+    training_days: number;
+    last_trained: string;
+  };
 }
 
 /**

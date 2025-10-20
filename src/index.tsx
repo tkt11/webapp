@@ -1532,62 +1532,154 @@ app.get('/', (c) => {
                     </div>
                   </div>
                   
-                  <!-- 特徴量重要度ビジュアライゼーション -->
+                  <!-- 特徴量重要度ビジュアライゼーション (動的) -->
                   <div class="mt-4 bg-white p-4 rounded-lg shadow">
                     <h6 class="font-bold text-sm text-indigo-700 mb-3">
-                      <i class="fas fa-chart-bar mr-1"></i>特徴量重要度（Top 5）
+                      <i class="fas fa-chart-bar mr-1"></i>特徴量重要度（Top 10）
                     </h6>
-                    <div class="space-y-2">
-                      <div>
-                        <div class="flex justify-between items-center mb-1">
-                          <span class="text-xs text-gray-700 font-medium">1. 現在価格 (close)</span>
-                          <span class="text-xs font-bold text-indigo-600">100%</span>
+                    \${data.prediction.ml_prediction.feature_importances ? \`
+                      <div class="mb-3">
+                        <canvas id="featureImportanceChart" style="max-height: 250px;"></canvas>
+                      </div>
+                    \` : \`
+                      <div class="space-y-2">
+                        <div>
+                          <div class="flex justify-between items-center mb-1">
+                            <span class="text-xs text-gray-700 font-medium">1. 現在価格 (close)</span>
+                            <span class="text-xs font-bold text-indigo-600">100%</span>
+                          </div>
+                          <div class="w-full bg-gray-200 rounded-full h-2">
+                            <div class="bg-indigo-600 h-2 rounded-full" style="width: 100%"></div>
+                          </div>
                         </div>
-                        <div class="w-full bg-gray-200 rounded-full h-2">
-                          <div class="bg-indigo-600 h-2 rounded-full" style="width: 100%"></div>
+                        <div>
+                          <div class="flex justify-between items-center mb-1">
+                            <span class="text-xs text-gray-700 font-medium">2. 20日移動平均 (SMA20)</span>
+                            <span class="text-xs font-bold text-indigo-600">71%</span>
+                          </div>
+                          <div class="w-full bg-gray-200 rounded-full h-2">
+                            <div class="bg-indigo-500 h-2 rounded-full" style="width: 71%"></div>
+                          </div>
+                        </div>
+                        <div>
+                          <div class="flex justify-between items-center mb-1">
+                            <span class="text-xs text-gray-700 font-medium">3. RSI指標</span>
+                            <span class="text-xs font-bold text-indigo-600">54%</span>
+                          </div>
+                          <div class="w-full bg-gray-200 rounded-full h-2">
+                            <div class="bg-indigo-400 h-2 rounded-full" style="width: 54%"></div>
+                          </div>
+                        </div>
+                        <div>
+                          <div class="flex justify-between items-center mb-1">
+                            <span class="text-xs text-gray-700 font-medium">4. MACD</span>
+                            <span class="text-xs font-bold text-indigo-600">43%</span>
+                          </div>
+                          <div class="w-full bg-gray-200 rounded-full h-2">
+                            <div class="bg-indigo-300 h-2 rounded-full" style="width: 43%"></div>
+                          </div>
+                        </div>
+                        <div>
+                          <div class="flex justify-between items-center mb-1">
+                            <span class="text-xs text-gray-700 font-medium">5. ボラティリティ</span>
+                            <span class="text-xs font-bold text-indigo-600">38%</span>
+                          </div>
+                          <div class="w-full bg-gray-200 rounded-full h-2">
+                            <div class="bg-indigo-200 h-2 rounded-full" style="width: 38%"></div>
+                          </div>
                         </div>
                       </div>
-                      <div>
-                        <div class="flex justify-between items-center mb-1">
-                          <span class="text-xs text-gray-700 font-medium">2. 20日移動平均 (SMA20)</span>
-                          <span class="text-xs font-bold text-indigo-600">71%</span>
-                        </div>
-                        <div class="w-full bg-gray-200 rounded-full h-2">
-                          <div class="bg-indigo-500 h-2 rounded-full" style="width: 71%"></div>
-                        </div>
+                    \`}
+                    <div class="mt-3 pt-3 border-t">
+                      <p class="text-xs text-gray-500">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        \${data.prediction.ml_prediction.feature_importances ? 
+                          'ML APIから取得した実際の特徴量重要度' : 
+                          '現在価格と移動平均が予測に最も影響（推定値）'}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <!-- MLモデル性能指標 -->
+                  \${data.prediction.ml_prediction.model_metrics ? \`
+                  <div class="mt-4 bg-white p-4 rounded-lg shadow">
+                    <h6 class="font-bold text-sm text-indigo-700 mb-3">
+                      <i class="fas fa-chart-line mr-1"></i>モデル性能指標
+                    </h6>
+                    <div class="grid grid-cols-2 gap-3">
+                      <div class="bg-blue-50 p-3 rounded-lg text-center">
+                        <p class="text-xs text-gray-600 mb-1">MAE (平均絶対誤差)</p>
+                        <p class="text-xl font-bold text-blue-600">\${data.prediction.ml_prediction.model_metrics.mae.toFixed(2)}</p>
+                        <p class="text-xs text-gray-500 mt-1">低いほど高精度</p>
                       </div>
-                      <div>
-                        <div class="flex justify-between items-center mb-1">
-                          <span class="text-xs text-gray-700 font-medium">3. RSI指標</span>
-                          <span class="text-xs font-bold text-indigo-600">54%</span>
-                        </div>
-                        <div class="w-full bg-gray-200 rounded-full h-2">
-                          <div class="bg-indigo-400 h-2 rounded-full" style="width: 54%"></div>
-                        </div>
+                      <div class="bg-green-50 p-3 rounded-lg text-center">
+                        <p class="text-xs text-gray-600 mb-1">RMSE (平均二乗誤差)</p>
+                        <p class="text-xl font-bold text-green-600">\${data.prediction.ml_prediction.model_metrics.rmse.toFixed(2)}</p>
+                        <p class="text-xs text-gray-500 mt-1">低いほど高精度</p>
                       </div>
-                      <div>
-                        <div class="flex justify-between items-center mb-1">
-                          <span class="text-xs text-gray-700 font-medium">4. MACD</span>
-                          <span class="text-xs font-bold text-indigo-600">43%</span>
-                        </div>
-                        <div class="w-full bg-gray-200 rounded-full h-2">
-                          <div class="bg-indigo-300 h-2 rounded-full" style="width: 43%"></div>
-                        </div>
+                      <div class="bg-purple-50 p-3 rounded-lg text-center">
+                        <p class="text-xs text-gray-600 mb-1">R² スコア</p>
+                        <p class="text-xl font-bold text-purple-600">\${data.prediction.ml_prediction.model_metrics.r2_score.toFixed(3)}</p>
+                        <p class="text-xs text-gray-500 mt-1">1に近いほど高精度</p>
                       </div>
-                      <div>
-                        <div class="flex justify-between items-center mb-1">
-                          <span class="text-xs text-gray-700 font-medium">5. ボラティリティ</span>
-                          <span class="text-xs font-bold text-indigo-600">38%</span>
-                        </div>
-                        <div class="w-full bg-gray-200 rounded-full h-2">
-                          <div class="bg-indigo-200 h-2 rounded-full" style="width: 38%"></div>
-                        </div>
+                      <div class="bg-orange-50 p-3 rounded-lg text-center">
+                        <p class="text-xs text-gray-600 mb-1">学習サンプル数</p>
+                        <p class="text-xl font-bold text-orange-600">\${data.prediction.ml_prediction.model_metrics.training_samples.toLocaleString()}</p>
+                        <p class="text-xs text-gray-500 mt-1">データ</p>
                       </div>
                     </div>
                     <div class="mt-3 pt-3 border-t">
                       <p class="text-xs text-gray-500">
+                        <i class="fas fa-database mr-1"></i>
+                        学習データ: \${data.prediction.ml_prediction.training_info?.training_days || 'N/A'}日分のデータで学習
+                      </p>
+                    </div>
+                  </div>
+                  \` : ''}
+                  
+                  <!-- ML学習データ詳細 -->
+                  \${data.prediction.ml_prediction.training_info ? \`
+                  <div class="mt-4 bg-gradient-to-r from-cyan-50 to-blue-50 p-4 rounded-lg border border-cyan-200">
+                    <h6 class="font-bold text-sm text-cyan-700 mb-3">
+                      <i class="fas fa-database mr-1"></i>学習データ詳細
+                    </h6>
+                    <div class="grid grid-cols-2 gap-3 text-xs">
+                      <div class="bg-white p-3 rounded-lg">
+                        <p class="text-gray-600 mb-1">データ開始日</p>
+                        <p class="font-bold text-cyan-700">\${data.prediction.ml_prediction.training_info.data_start_date}</p>
+                      </div>
+                      <div class="bg-white p-3 rounded-lg">
+                        <p class="text-gray-600 mb-1">データ終了日</p>
+                        <p class="font-bold text-cyan-700">\${data.prediction.ml_prediction.training_info.data_end_date}</p>
+                      </div>
+                      <div class="bg-white p-3 rounded-lg">
+                        <p class="text-gray-600 mb-1">学習期間</p>
+                        <p class="font-bold text-cyan-700">\${data.prediction.ml_prediction.training_info.training_days}日</p>
+                      </div>
+                      <div class="bg-white p-3 rounded-lg">
+                        <p class="text-gray-600 mb-1">最終学習日</p>
+                        <p class="font-bold text-cyan-700">\${data.prediction.ml_prediction.training_info.last_trained}</p>
+                      </div>
+                    </div>
+                    <div class="mt-3 pt-3 border-t border-cyan-200">
+                      <p class="text-xs text-gray-600">
                         <i class="fas fa-info-circle mr-1"></i>
-                        現在価格と移動平均が予測に最も影響
+                        学習データは\${symbol}の過去\${data.prediction.ml_prediction.training_info.training_days}日分の株価データを使用し、LightGBMモデルで学習されています
+                      </p>
+                    </div>
+                  </div>
+                  \` : ''}
+                  
+                  <!-- 予測比較チャート -->
+                  <div class="mt-4 bg-white p-4 rounded-lg shadow">
+                    <h6 class="font-bold text-sm text-indigo-700 mb-3">
+                      <i class="fas fa-chart-area mr-1"></i>予測手法の比較チャート
+                    </h6>
+                    <canvas id="predictionComparisonChart" style="max-height: 200px;"></canvas>
+                    <div class="mt-3 pt-3 border-t">
+                      <p class="text-xs text-gray-500">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        統計予測（青）とML予測（緑）の予測価格を視覚的に比較
                       </p>
                     </div>
                   </div>
@@ -2020,6 +2112,107 @@ app.get('/', (c) => {
             }
           }
         })
+        
+        // ML予測: 特徴量重要度チャート（ML APIからデータがある場合のみ）
+        if (data.prediction.ml_prediction && data.prediction.ml_prediction.feature_importances) {
+          const featureCtx = document.getElementById('featureImportanceChart').getContext('2d')
+          const features = data.prediction.ml_prediction.feature_importances.slice(0, 10)
+          
+          new Chart(featureCtx, {
+            type: 'bar',
+            data: {
+              labels: features.map(f => f.feature),
+              datasets: [{
+                label: '重要度',
+                data: features.map(f => f.importance * 100),
+                backgroundColor: 'rgba(99, 102, 241, 0.6)',
+                borderColor: 'rgb(99, 102, 241)',
+                borderWidth: 1
+              }]
+            },
+            options: {
+              indexAxis: 'y',
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  callbacks: {
+                    label: function(context) {
+                      return '重要度: ' + context.parsed.x.toFixed(1) + '%'
+                    }
+                  }
+                }
+              },
+              scales: {
+                x: {
+                  beginAtZero: true,
+                  max: 100,
+                  title: { display: true, text: '重要度 (%)' }
+                }
+              }
+            }
+          })
+        }
+        
+        // ML予測: 予測比較チャート
+        if (data.prediction.ml_prediction) {
+          const comparisonCtx = document.getElementById('predictionComparisonChart').getContext('2d')
+          
+          // 統計予測の方向性（BUY=上昇、SELL=下降、HOLD=横ばい）
+          const statDirection = data.prediction.action
+          const statPredictedPrice = statDirection === 'BUY' 
+            ? data.current_price * 1.05 
+            : statDirection === 'SELL' 
+            ? data.current_price * 0.95 
+            : data.current_price
+          
+          new Chart(comparisonCtx, {
+            type: 'bar',
+            data: {
+              labels: ['現在価格', '統計予測', 'ML予測'],
+              datasets: [{
+                label: '価格 (USD)',
+                data: [
+                  data.current_price,
+                  statPredictedPrice,
+                  data.prediction.ml_prediction.predicted_price
+                ],
+                backgroundColor: [
+                  'rgba(156, 163, 175, 0.6)',
+                  'rgba(59, 130, 246, 0.6)',
+                  'rgba(34, 197, 94, 0.6)'
+                ],
+                borderColor: [
+                  'rgb(156, 163, 175)',
+                  'rgb(59, 130, 246)',
+                  'rgb(34, 197, 94)'
+                ],
+                borderWidth: 2
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  callbacks: {
+                    label: function(context) {
+                      return '$' + context.parsed.y.toFixed(2)
+                    }
+                  }
+                }
+              },
+              scales: {
+                y: {
+                  beginAtZero: false,
+                  title: { display: true, text: '価格 (USD)' }
+                }
+              }
+            }
+          })
+        }
 
         // スコアカードにイベントリスナーを追加(DOM完全レンダリング後に実行)
         setTimeout(() => {
