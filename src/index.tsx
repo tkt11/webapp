@@ -2641,15 +2641,28 @@ app.get('/', (c) => {
             // 全体のラベル: 過去30日 + 未来30日
             const allLabels = [...historicalDates, ...futurePred.dates]
             
-            // 過去データ: 最初の30個は実データ、残りはnull
+            // 過去データ: 実データを表示（未来部分にも最後の値を1つ追加して接続）
             const historicalData = [...historicalPrices, ...Array(futurePred.predictions.length).fill(null)]
             
-            // 未来予測データ: 最初の30個はnull、残りは予測値
-            const futureData = [...Array(historicalPrices.length).fill(null), ...futurePred.predictions]
+            // 未来予測データ: 最初に過去の最後の値を追加してスムーズに接続
+            const futureData = [
+              ...Array(historicalPrices.length - 1).fill(null),
+              historicalPrices[historicalPrices.length - 1],  // 接続点
+              ...futurePred.predictions
+            ]
             
-            // 信頼区間
-            const lowerBoundData = [...Array(historicalPrices.length).fill(null), ...futurePred.lower_bound]
-            const upperBoundData = [...Array(historicalPrices.length).fill(null), ...futurePred.upper_bound]
+            // 信頼区間（接続点を追加）
+            const lastPrice = historicalPrices[historicalPrices.length - 1]
+            const lowerBoundData = [
+              ...Array(historicalPrices.length - 1).fill(null),
+              lastPrice * 0.95,  // 接続点
+              ...futurePred.lower_bound
+            ]
+            const upperBoundData = [
+              ...Array(historicalPrices.length - 1).fill(null),
+              lastPrice * 1.05,  // 接続点
+              ...futurePred.upper_bound
+            ]
             
             new Chart(mlFuturePriceCtx, {
               type: 'line',
@@ -2670,13 +2683,13 @@ app.get('/', (c) => {
                   {
                     label: 'ML予測価格（未来30日）',
                     data: futureData,
-                    borderColor: 'rgb(34, 197, 94)',
-                    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                    borderColor: 'rgb(251, 146, 60)',
+                    backgroundColor: 'rgba(251, 146, 60, 0.1)',
                     borderWidth: 3,
-                    tension: 0.3,
+                    tension: 0.4,
                     fill: false,
-                    pointRadius: 2,
-                    pointHoverRadius: 5,
+                    pointRadius: 3,
+                    pointHoverRadius: 6,
                     borderDash: [5, 5]
                   },
                   {

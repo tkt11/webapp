@@ -536,7 +536,15 @@ async def train_model(request: Request, data: PredictionRequest):
         
         # 現在の最新特徴量を取得
         last_features = X[-1].copy()
-        last_price = prices[-1]
+        
+        # 過去50日の価格履歴を保持（移動平均計算用）
+        price_history = list(prices[-50:])
+        
+        # 履歴データのボラティリティを計算
+        price_changes = np.diff(prices[-30:]) / prices[-31:-1]
+        historical_volatility = np.std(price_changes)
+        
+        print(f"   Historical volatility: {historical_volatility:.4f}")
         
         # 30日間の予測をシミュレーション
         for day in range(1, 31):
@@ -546,15 +554,42 @@ async def train_model(request: Request, data: PredictionRequest):
             
             # 予測実行
             pred_price = model.predict([last_features], num_iteration=best_iteration)[0]
-            future_predictions_list.append(float(pred_price))
             
-            # 次の日のために特徴量を更新（簡易的に現在価格を更新）
+            # ランダムなボラティリティを追加（より現実的な変動）
+            volatility_factor = np.random.normal(0, historical_volatility * 0.5)
+            pred_price = pred_price * (1 + volatility_factor)
+            
+            future_predictions_list.append(float(pred_price))
+            price_history.append(pred_price)
+            
+            # 次の日のために特徴量を正確に更新
             last_features[0] = pred_price  # price
-            # SMAsも更新（簡易版）
-            last_features[1] = pred_price * 0.99  # sma_5
-            last_features[2] = pred_price * 0.98  # sma_10
-            last_features[3] = pred_price * 0.97  # sma_20
-            last_features[4] = pred_price * 0.96  # sma_50
+            
+            # 実際の移動平均を計算
+            last_features[1] = np.mean(price_history[-5:])   # sma_5
+            last_features[2] = np.mean(price_history[-10:])  # sma_10
+            last_features[3] = np.mean(price_history[-20:])  # sma_20
+            last_features[4] = np.mean(price_history[-50:])  # sma_50
+            
+            # ボラティリティ（過去20日）
+            if len(price_history) >= 20:
+                recent_returns = np.diff(price_history[-20:]) / price_history[-21:-1]
+                last_features[5] = np.std(recent_returns)  # volatility_20
+            
+            # モメンタム（過去10日の変化率）
+            if len(price_history) >= 10:
+                last_features[6] = (price_history[-1] - price_history[-10]) / price_history[-10]  # momentum_10
+            
+            # RSI（簡易計算）
+            if len(price_history) >= 14:
+                recent_changes = np.diff(price_history[-15:])
+                gains = recent_changes[recent_changes > 0].sum() / 14
+                losses = -recent_changes[recent_changes < 0].sum() / 14
+                if losses > 0:
+                    rs = gains / losses
+                    last_features[7] = 100 - (100 / (1 + rs))  # rsi_14
+                else:
+                    last_features[7] = 100
         
         # 信頼区間を計算（±5%の範囲）
         lower_bound = [p * 0.95 for p in future_predictions_list]
