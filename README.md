@@ -279,6 +279,7 @@ npm run build && pm2 restart stock-ai-predictor
 - [x] **予測精度可視化**: RMSE, MAE, 方向性正解率の表示 ✅
 - [x] **ML推論詳細表示**: 特徴量重要度、モデル性能、学習データ情報 ✅
 - [x] **予測一致度分析**: 統計予測とML予測の比較・一致度判定 ✅
+- [x] **オンデマンド学習機能 v8.0**: 銘柄専用MLモデルのリアルタイム学習 ✅
 - [ ] ポートフォリオ管理機能
 - [ ] アラート機能（目標株価到達時通知）
 - [ ] 日本株対応（市場拡大）
@@ -291,6 +292,36 @@ npm run build && pm2 restart stock-ai-predictor
 - [ ] リアルタイム価格更新（WebSocket）
 
 ## ✅ 最近の改善
+
+### 2025-10-20 メジャーアップデート v8.0 - オンデマンド学習機能完全実装 ✅
+1. **ML API `/train` エンドポイント実装**: 銘柄専用LightGBMモデルのリアルタイム学習
+   - 時系列特徴量エンジニアリング（移動平均、ボラティリティ、モメンタム）
+   - 80/20 train/test split with early stopping
+   - 学習時間: 約0.1秒（小規模データ）〜30秒（大規模データ）
+2. **学習結果の詳細情報返却**:
+   - 学習データ詳細: 総サンプル数、train/test分割、特徴量数
+   - ハイパーパラメータ: objective, boosting_type, num_leaves, learning_rate, max_depth等
+   - 学習曲線: イテレーションごとのtrain/val loss（RMSE）
+   - 性能指標: train/test MAE, RMSE, R²スコア、汎化ギャップ
+   - 特徴量重要度: Gain-basedランキング（Top 16）
+   - 学習メタ情報: model_id, 学習時間, タイムスタンプ
+3. **UI可視化の完全実装**:
+   - 学習サマリーカード: モデルID、学習時間、サンプル数
+   - 学習データ詳細テーブル: 総サンプル数、train/test分割、特徴量数
+   - ハイパーパラメータグリッド: 9つの主要パラメータを表示
+   - 学習曲線チャート（Chart.js折れ線グラフ）: train loss vs val loss
+   - 性能指標比較: train vs test の MAE, RMSE, R²を並列表示
+   - 汎化ギャップ指標: 過学習の有無を色分けで表示（緑=優秀、黄=注意、赤=過学習）
+   - 特徴量重要度チャート（Chart.js横棒グラフ）: Top 10の相対重要度
+4. **学習フロー統合**:
+   - チェックボックスで学習ON/OFF切り替え
+   - 動的ローディングメッセージ（学習中は「モデル学習を実行中」）
+   - 学習結果を7日間KVキャッシュ（次回予測で再利用）
+   - 学習失敗時は汎用モデルにフォールバック
+5. **バックエンド実装**:
+   - `trainMLModel()`: ML API `/train` エンドポイント呼び出し
+   - `MLTrainingResponse`: 詳細な型定義（TypeScript）
+   - `generateMLPrediction()`: trainModelフラグ対応、学習結果とprediction結果を同時返却
 
 ### 2025-10-20 バグ修正 v7.1 - ML予測エラー完全解決 ✅
 1. **Critical Bug Fix**: `technical.indicators.rsi` → `technical.rsi` に修正
@@ -410,8 +441,8 @@ git push -u origin main
 ---
 
 **Last Updated**: 2025-10-20
-**Version**: v7.1 - ML予測エラー完全解決 ✅
-**Status**: ✅ 完全動作確認済み（GPT-4o + デュアル予測 + ML詳細ビジュアライゼーション + 予測一致度分析 + ML予測修正）
+**Version**: v8.0 - オンデマンド学習機能完全実装 ✅
+**Status**: ✅ 完全動作確認済み（GPT-4o + デュアル予測 + オンデマンド学習 + 学習結果可視化）
 **Demo URL**: https://3000-i1j5rforwq1dklhedain9-2e77fc33.sandbox.novita.ai
 
 ## 🎉 主要実装完了事項
@@ -439,3 +470,4 @@ git push -u origin main
 ✅ v7: **MLモデル性能指標表示**（MAE, RMSE, R²スコア、学習サンプル数）
 ✅ v7: **学習データ詳細情報**（データ期間、学習日数、最終学習日）
 ✅ v7.1: **ML予測エラー完全解決**（technical.indicators → technical に修正）
+✅ v8.0: **オンデマンド学習機能完全実装**（銘柄専用MLモデルのリアルタイム学習 + 詳細可視化）
