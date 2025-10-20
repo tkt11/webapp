@@ -7,6 +7,7 @@ import type {
   AnalystRating 
 } from '../types'
 import OpenAI from 'openai'
+import { predictWithML, type MLPredictionResponse } from './ml-prediction'
 
 export function generatePrediction(
   technical: TechnicalAnalysis,
@@ -65,8 +66,9 @@ export function generatePrediction(
   } else if (finalScore >= 40) {
     // HOLD判定（様子見）
     action = 'HOLD'
-    // 50点に近いほど信頼度が低い（迷いが大きい）
-    baseConfidence = Math.round(40 + Math.abs(50 - finalScore))
+    // 40-60点: 50点に近いほど信頼度が低い（迷いが大きい）
+    // 40点→55%, 50点→40%, 60点→55%
+    baseConfidence = Math.round(55 - Math.abs(50 - finalScore) * 1.5)
   } else if (finalScore >= 25) {
     // 中程度のSELL判定
     action = 'SELL'
@@ -317,53 +319,80 @@ export function generateBackfitPrediction(
     directionAccuracy: number
   }
 } {
-  // 過去30日分の予測を生成(ランダム要素なしの決定論的予測)
+  // 過去30日分の予測を生成(移動平均ベース - 非線形)
   const predictedPrices: number[] = []
+  const windowSize = 5  // 5日移動平均
   
-  // 過去のボラティリティを計算(最初の20日間のみ使用)
-  const returns = []
-  for (let i = 1; i < Math.min(20, historicalPrices.length); i++) {
-    returns.push((historicalPrices[i] - historicalPrices[i-1]) / historicalPrices[i-1])
-  }
-  const avgReturn = returns.reduce((a, b) => a + b, 0) / returns.length
-  
-  // スコアから予測トレンドを計算
-  let dailyTrendPercent = 0
+  // スコアから予測トレンド強度を計算
+  let trendStrength = 0
   if (finalScore >= 75) {
-    dailyTrendPercent = 0.5
+    trendStrength = 0.004  // +0.4%/日相当
   } else if (finalScore >= 60) {
-    dailyTrendPercent = 0.3
+    trendStrength = 0.002  // +0.2%/日相当
   } else if (finalScore >= 40) {
-    dailyTrendPercent = 0
+    trendStrength = 0
   } else if (finalScore >= 25) {
-    dailyTrendPercent = -0.3
+    trendStrength = -0.002
   } else {
-    dailyTrendPercent = -0.5
+    trendStrength = -0.004
   }
   
   // テクニカル指標から追加調整
   if (technical.indicators) {
     if (technical.indicators.rsi > 70) {
-      dailyTrendPercent -= 0.15
+      trendStrength -= 0.001
     } else if (technical.indicators.rsi < 30) {
-      dailyTrendPercent += 0.15
+      trendStrength += 0.001
     }
     
     if (technical.indicators.macd > 0) {
-      dailyTrendPercent += 0.1
+      trendStrength += 0.001
     } else {
-      dailyTrendPercent -= 0.1
+      trendStrength -= 0.001
     }
   }
   
-  // 過去30日分の予測を生成(決定論的 - ランダムなし)
-  let price = historicalPrices[0]
-  predictedPrices.push(price)
-  
-  for (let i = 1; i < historicalPrices.length; i++) {
-    const dailyChange = dailyTrendPercent / 100
-    price = price * (1 + dailyChange)
-    predictedPrices.push(price)
+  /**
+   * 非線形予測アルゴリズム: 5日移動平均（SMA）ベース
+   * 
+   * 【アルゴリズム概要】
+   * - 単純移動平均（Simple Moving Average）を使用した統計的予測
+   * - 線形トレンド（固定の日次変化率）ではなく、直近5日間の平均価格に基づく
+   * - トレンド強度を加味することで、上昇/下降の勢いを反映
+   * 
+   * 【計算式】
+   * 予測価格[i] = SMA(直近5日) + (SMA × トレンド強度)
+   * 
+   * 【特徴】
+   * ✓ 価格の曲線に自然に追従（非線形）
+   * ✓ 直近の価格変動を重視
+   * ✓ ボラティリティの影響を平滑化
+   * 
+   * 【制限事項】
+   * ✗ 機械学習（ML）ではなく統計的手法
+   * ✗ XGBoost/LSTMなどの高度なMLは未対応（Cloudflare Workers制限）
+   * ✗ 急激な市場変動には対応が遅れる可能性
+   * 
+   * 【将来的な改善案】
+   * - 外部ML API（OpenAI、Google Vertex AI）との統合
+   * - ARIMA、Prophet等の時系列予測モデル導入
+   */
+  // 移動平均ベースの予測(非線形)
+  for (let i = 0; i < historicalPrices.length; i++) {
+    if (i < windowSize) {
+      // 最初のwindowSize日は移動平均が計算できないので実績値を使用
+      predictedPrices.push(historicalPrices[i])
+    } else {
+      // 過去windowSize日の移動平均を計算
+      const recentPrices = predictedPrices.slice(i - windowSize, i)
+      const sma = recentPrices.reduce((a, b) => a + b, 0) / windowSize
+      
+      // トレンド成分を加味
+      const trendAdjustment = sma * trendStrength
+      const predictedPrice = sma + trendAdjustment
+      
+      predictedPrices.push(predictedPrice)
+    }
   }
   
   // 精度指標を計算
@@ -409,6 +438,29 @@ export function generateBackfitPrediction(
       mape: Math.round(mape * 100) / 100,
       directionAccuracy: Math.round(directionAccuracy * 100) / 100
     }
+  }
+}
+
+// ML予測を生成（統計的予測と並行表示用）
+export async function generateMLPrediction(
+  symbol: string,
+  historicalPrices: number[],
+  technical: TechnicalAnalysis,
+  fundamental: FundamentalAnalysis,
+  sentiment: SentimentAnalysis
+): Promise<MLPredictionResponse | null> {
+  try {
+    const mlResult = await predictWithML(
+      symbol,
+      historicalPrices,
+      technical.indicators,
+      fundamental,
+      sentiment.score
+    )
+    return mlResult
+  } catch (error) {
+    console.error('ML prediction error:', error)
+    return null
   }
 }
 

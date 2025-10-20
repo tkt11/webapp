@@ -98,7 +98,7 @@ export async function fetchFinancialMetrics(symbol: string, apiKey: string) {
 }
 
 // Finnhub: ニュース取得
-export async function fetchNews(symbol: string, apiKey: string) {
+export async function fetchNews(symbol: string, apiKey: string, limit: number = 20) {
   const today = new Date()
   const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
   
@@ -110,7 +110,8 @@ export async function fetchNews(symbol: string, apiKey: string) {
   const response = await fetch(url)
   const data = await response.json()
   
-  return Array.isArray(data) ? data.slice(0, 20) : []
+  // limit パラメータで取得件数を制限（デフォルト20件）
+  return Array.isArray(data) ? data.slice(0, limit) : []
 }
 
 // Finnhub: アナリスト推奨取得

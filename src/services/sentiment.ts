@@ -117,12 +117,46 @@ JSON形式で回答してください：
       // GPT-4oのスコアとキーワードスコアを統合（GPT-4oに70%の重み）
       const finalScore = (gptAnalysis.score * 0.7) + (keywordScore * 0.3)
       
+      // ニュース記事を個別に分類
+      const articleSentiments = news.slice(0, 20).map(article => {
+        const text = `${article.headline} ${article.summary}`.toLowerCase()
+        let score = 0
+        positiveKeywords.forEach(keyword => {
+          if (text.includes(keyword.toLowerCase())) score++
+        })
+        negativeKeywords.forEach(keyword => {
+          if (text.includes(keyword.toLowerCase())) score--
+        })
+        
+        if (score > 0) return 'positive'
+        else if (score < 0) return 'negative'
+        else return 'neutral'
+      })
+      
+      const positiveNewsCount = articleSentiments.filter(s => s === 'positive').length
+      const negativeNewsCount = articleSentiments.filter(s => s === 'negative').length
+      const neutralNewsCount = articleSentiments.filter(s => s === 'neutral').length
+      
+      // ニュース判断例を作成(最大5件) - 日付情報を追加
+      const newsExamples = news.slice(0, 5).map((article, idx) => ({
+        headline: article.headline,
+        source: article.source,
+        sentiment: articleSentiments[idx],
+        summary: article.summary.substring(0, 100) + '...',
+        datetime: article.datetime,  // Unix timestamp
+        date_formatted: new Date(article.datetime * 1000).toISOString().split('T')[0]  // YYYY-MM-DD
+      }))
+      
       return {
         score: Math.round(finalScore),
         sentiment: gptAnalysis.sentiment || 'neutral',
         news_count: news.length,
+        positive_count: positiveNewsCount,
+        negative_count: negativeNewsCount,
+        neutral_count: neutralNewsCount,
         summary: gptAnalysis.summary || 'GPT-4o分析結果を取得できませんでした',
         confidence: 90,
+        news_examples: newsExamples,
         gpt_insight: JSON.stringify({
           positive_factors: gptAnalysis.positive_factors || [],
           negative_factors: gptAnalysis.negative_factors || []
@@ -140,11 +174,45 @@ JSON形式で回答してください：
   if (keywordScore > 60) sentiment = 'positive'
   else if (keywordScore < 40) sentiment = 'negative'
   
+  // ニュース記事を個別に分類(キーワードベース)
+  const articleSentiments = news.map(article => {
+    const text = `${article.headline} ${article.summary}`.toLowerCase()
+    let score = 0
+    positiveKeywords.forEach(keyword => {
+      if (text.includes(keyword.toLowerCase())) score++
+    })
+    negativeKeywords.forEach(keyword => {
+      if (text.includes(keyword.toLowerCase())) score--
+    })
+    
+    if (score > 0) return 'positive'
+    else if (score < 0) return 'negative'
+    else return 'neutral'
+  })
+  
+  const positiveNewsCount = articleSentiments.filter(s => s === 'positive').length
+  const negativeNewsCount = articleSentiments.filter(s => s === 'negative').length
+  const neutralNewsCount = articleSentiments.filter(s => s === 'neutral').length
+  
+  // ニュース判断例を作成(最大5件) - 日付情報を追加
+  const newsExamples = news.slice(0, 5).map((article, idx) => ({
+    headline: article.headline,
+    source: article.source,
+    sentiment: articleSentiments[idx],
+    summary: article.summary.substring(0, 100) + '...',
+    datetime: article.datetime,  // Unix timestamp
+    date_formatted: new Date(article.datetime * 1000).toISOString().split('T')[0]  // YYYY-MM-DD
+  }))
+  
   return {
     score: keywordScore,
     sentiment,
     news_count: news.length,
-    summary: `ポジティブ: ${positiveCount}件、ネガティブ: ${negativeCount}件のキーワードを検出`,
+    positive_count: positiveNewsCount,
+    negative_count: negativeNewsCount,
+    neutral_count: neutralNewsCount,
+    news_examples: newsExamples,
+    summary: `ポジティブ: ${positiveNewsCount}件、ネガティブ: ${negativeNewsCount}件、中立: ${neutralNewsCount}件`,
     confidence: 60,
     gpt_insight: 'GPT-4o APIキーが提供されていないため、キーワードベース分析のみ実行'
   }

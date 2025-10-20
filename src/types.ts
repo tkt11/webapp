@@ -30,6 +30,17 @@ export interface SentimentAnalysis {
   score: number
   sentiment: 'positive' | 'negative' | 'neutral'
   news_count: number
+  positive_count?: number
+  negative_count?: number
+  neutral_count?: number
+  news_examples?: Array<{
+    headline: string
+    source: string
+    sentiment: string
+    summary: string
+    datetime: number
+    date_formatted: string
+  }>
   summary: string
   confidence: number
   gpt_insight?: string
