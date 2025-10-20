@@ -6,7 +6,7 @@ import { performFundamentalAnalysis } from './services/fundamental'
 import { performSentimentAnalysis } from './services/sentiment'
 import { analyzeMacroEconomics } from './services/macro'
 import { analyzeAnalystRating } from './services/analyst'
-import { generatePrediction, generateDetailedExplanation } from './services/prediction'
+import { generatePrediction, generateDetailedExplanation, generateFuturePrediction } from './services/prediction'
 import { runInvestmentSimulation, runBacktest } from './services/simulation'
 import {
   fetchStockPrices,
@@ -90,12 +90,22 @@ app.post('/api/analyze', async (c) => {
       env.OPENAI_API_KEY
     )
     
+    // 未来30日の予測を生成
+    const futurePrediction = generateFuturePrediction(
+      currentPrice,
+      prediction.score,
+      technical,
+      prediction.action,
+      stockData.prices.slice(-30)
+    )
+    
     return c.json({
       symbol,
       current_price: currentPrice,
       prediction: {
         ...prediction,
-        detailed_explanation: detailedExplanation
+        detailed_explanation: detailedExplanation,
+        future: futurePrediction
       },
       analysis: {
         technical,
@@ -706,6 +716,39 @@ app.get('/', (c) => {
               <canvas id="radarChart" style="max-height: 300px;"></canvas>
             </div>
 
+            <!-- BUY/SELL推奨タイミングと利益予測 -->
+            <div class="bg-gradient-to-r from-green-50 to-blue-50 p-6 rounded-lg mb-6">
+              <h4 class="font-bold text-xl mb-4 text-center"><i class="fas fa-coins mr-2"></i>投資戦略推奨</h4>
+              <div class="grid grid-cols-3 gap-4 mb-4">
+                <div class="bg-white p-4 rounded-lg shadow">
+                  <p class="text-sm text-gray-600 mb-2"><i class="fas fa-calendar-check mr-1"></i>推奨購入日</p>
+                  <p class="text-xl font-bold text-green-600">\${data.prediction.future.buyDate}</p>
+                  <p class="text-sm text-gray-500 mt-1">$\${data.prediction.future.buyPrice.toFixed(2)}</p>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow">
+                  <p class="text-sm text-gray-600 mb-2"><i class="fas fa-calendar-times mr-1"></i>推奨売却日</p>
+                  <p class="text-xl font-bold text-red-600">\${data.prediction.future.sellDate}</p>
+                  <p class="text-sm text-gray-500 mt-1">$\${data.prediction.future.sellPrice.toFixed(2)}</p>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow">
+                  <p class="text-sm text-gray-600 mb-2"><i class="fas fa-chart-line mr-1"></i>予想利益率</p>
+                  <p class="text-2xl font-bold \${data.prediction.future.profitPercent >= 0 ? 'text-green-600' : 'text-red-600'}">
+                    \${data.prediction.future.profitPercent >= 0 ? '+' : ''}\${data.prediction.future.profitPercent.toFixed(2)}%
+                  </p>
+                  <p class="text-sm text-gray-500 mt-1">
+                    \${data.prediction.future.profitPercent >= 0 ? '利益見込み' : '損失リスク'}
+                  </p>
+                </div>
+              </div>
+              <div class="bg-yellow-50 border-l-4 border-yellow-500 p-4 rounded">
+                <p class="text-sm text-gray-700">
+                  <i class="fas fa-exclamation-circle mr-2 text-yellow-600"></i>
+                  <strong>重要:</strong> この予測は過去データと現在のスコアに基づく統計的推定です。
+                  実際の市場は予測通りに動かない可能性があります。投資は自己責任で行ってください。
+                </p>
+              </div>
+            </div>
+
             <div class="grid grid-cols-2 gap-6 mb-6">
               <div>
                 <h4 class="font-bold text-green-600 mb-2"><i class="fas fa-check-circle mr-2"></i>ポジティブ要因</h4>
@@ -736,7 +779,7 @@ app.get('/', (c) => {
           </div>
 
           <div class="bg-white rounded-lg shadow-md p-6">
-            <h3 class="text-xl font-bold mb-4">株価チャート（過去30日）</h3>
+            <h3 class="text-xl font-bold mb-4">株価チャート（過去30日 + 未来30日予測）</h3>
             <canvas id="priceChart"></canvas>
           </div>
         \`
@@ -744,49 +787,43 @@ app.get('/', (c) => {
         document.getElementById('analysis-result').innerHTML = resultHTML
         document.getElementById('analysis-result').style.display = 'block'
 
-        // Chart.jsでグラフ表示（実績株価 + 移動平均線）
+        // Chart.jsでグラフ表示（過去実績 + 未来予測）
         const ctx = document.getElementById('priceChart').getContext('2d')
         
-        // 移動平均線の計算（20日移動平均）
-        const calculateSMA = (prices, period) => {
-          const sma = []
-          for (let i = 0; i < prices.length; i++) {
-            if (i < period - 1) {
-              sma.push(null)
-            } else {
-              const sum = prices.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0)
-              sma.push(sum / period)
-            }
-          }
-          return sma
-        }
+        // 過去30日と未来30日のデータを結合
+        const allDates = [...data.chart_data.dates, ...data.prediction.future.dates.slice(1)]
+        const historicalPrices = [...data.chart_data.prices]
+        const futurePrices = [null, ...data.prediction.future.predictedPrices.slice(1)]
         
-        const sma20 = calculateSMA(data.chart_data.prices, 20)
+        // 過去データをnullで埋める
+        const historicalData = [...historicalPrices, ...new Array(futurePrices.length - 1).fill(null)]
+        const futureData = [...new Array(historicalPrices.length - 1).fill(null), ...futurePrices]
         
         new Chart(ctx, {
           type: 'line',
           data: {
-            labels: data.chart_data.dates,
+            labels: allDates,
             datasets: [
               {
-                label: '株価 (実績)',
-                data: data.chart_data.prices,
+                label: '株価 (過去30日実績)',
+                data: historicalData,
                 borderColor: 'rgb(59, 130, 246)',
                 backgroundColor: 'rgba(59, 130, 246, 0.1)',
                 borderWidth: 2,
                 tension: 0.1,
-                fill: true
+                fill: true,
+                pointRadius: 2
               },
               {
-                label: '20日移動平均 (予測トレンド)',
-                data: sma20,
+                label: '株価予測 (未来30日)',
+                data: futureData,
                 borderColor: 'rgb(249, 115, 22)',
-                backgroundColor: 'transparent',
+                backgroundColor: 'rgba(249, 115, 22, 0.1)',
                 borderWidth: 2,
                 borderDash: [5, 5],
                 tension: 0.1,
-                fill: false,
-                pointRadius: 0
+                fill: true,
+                pointRadius: 2
               }
             ]
           },
@@ -1203,7 +1240,7 @@ app.get('/', (c) => {
     // let currentAnalysisData = null  // 既にグローバルスコープで宣言済み
 
     // 詳細モーダル表示
-    function showDetailModal(dimension) {
+    window.showDetailModal = function(dimension) {
       console.log('showDetailModal called with dimension:', dimension)
       console.log('currentAnalysisData:', window.currentAnalysisData)
       
@@ -1840,7 +1877,7 @@ app.get('/', (c) => {
     }
 
     // モーダルを閉じる
-    function closeModal() {
+    window.closeModal = function() {
       document.getElementById('detailModal').classList.remove('active')
     }
 

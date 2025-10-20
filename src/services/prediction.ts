@@ -180,6 +180,126 @@ export function generatePrediction(
   }
 }
 
+// 未来30日間の株価予測を生成
+export function generateFuturePrediction(
+  currentPrice: number,
+  finalScore: number,
+  technical: TechnicalAnalysis,
+  action: 'BUY' | 'SELL' | 'HOLD',
+  historicalPrices: number[]
+): {
+  dates: string[],
+  predictedPrices: number[],
+  buyDate: string,
+  sellDate: string,
+  buyPrice: number,
+  sellPrice: number,
+  profitPercent: number
+} {
+  const today = new Date()
+  const dates: string[] = []
+  const predictedPrices: number[] = []
+  
+  // 過去のボラティリティを計算
+  const returns = []
+  for (let i = 1; i < historicalPrices.length; i++) {
+    returns.push((historicalPrices[i] - historicalPrices[i-1]) / historicalPrices[i-1])
+  }
+  const avgReturn = returns.reduce((a, b) => a + b, 0) / returns.length
+  const volatility = Math.sqrt(
+    returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / returns.length
+  )
+  
+  // スコアから予測トレンドを計算
+  // 75点以上: +0.5%/日、60-75: +0.3%/日、40-60: 0%/日、25-40: -0.3%/日、25未満: -0.5%/日
+  let dailyTrendPercent = 0
+  if (finalScore >= 75) {
+    dailyTrendPercent = 0.5
+  } else if (finalScore >= 60) {
+    dailyTrendPercent = 0.3
+  } else if (finalScore >= 40) {
+    dailyTrendPercent = 0
+  } else if (finalScore >= 25) {
+    dailyTrendPercent = -0.3
+  } else {
+    dailyTrendPercent = -0.5
+  }
+  
+  // テクニカル指標から追加調整 (nullチェック)
+  if (technical.indicators) {
+    if (technical.indicators.rsi > 70) {
+      dailyTrendPercent -= 0.15 // 買われすぎ
+    } else if (technical.indicators.rsi < 30) {
+      dailyTrendPercent += 0.15 // 売られすぎ
+    }
+    
+    if (technical.indicators.macd > 0) {
+      dailyTrendPercent += 0.1 // 上昇トレンド
+    } else {
+      dailyTrendPercent -= 0.1 // 下降トレンド
+    }
+  }
+  
+  // 30日間の予測を生成
+  let price = currentPrice
+  for (let i = 0; i <= 30; i++) {
+    const futureDate = new Date(today)
+    futureDate.setDate(today.getDate() + i)
+    dates.push(futureDate.toISOString().split('T')[0])
+    
+    if (i === 0) {
+      predictedPrices.push(price)
+    } else {
+      // トレンド + ランダムボラティリティ
+      const randomFactor = (Math.random() - 0.5) * volatility * 2
+      const dailyChange = (dailyTrendPercent / 100) + randomFactor
+      price = price * (1 + dailyChange)
+      predictedPrices.push(price)
+    }
+  }
+  
+  // BUY/SELLタイミングの推奨
+  let buyDate = dates[0] // 今日
+  let sellDate = dates[30] // 30日後
+  let buyPrice = predictedPrices[0]
+  let sellPrice = predictedPrices[30]
+  
+  if (action === 'BUY') {
+    // 今日買って、最高値で売る
+    buyDate = dates[0]
+    buyPrice = predictedPrices[0]
+    
+    const maxPriceIndex = predictedPrices.indexOf(Math.max(...predictedPrices))
+    sellDate = dates[maxPriceIndex]
+    sellPrice = predictedPrices[maxPriceIndex]
+  } else if (action === 'SELL') {
+    // 最安値で買って、今日売る(ショート想定)
+    const minPriceIndex = predictedPrices.indexOf(Math.min(...predictedPrices))
+    buyDate = dates[0]
+    buyPrice = predictedPrices[0]
+    sellDate = dates[minPriceIndex]
+    sellPrice = predictedPrices[minPriceIndex]
+  } else {
+    // HOLD: 様子見なので大きな変動なし
+    buyDate = dates[0]
+    sellDate = dates[30]
+    buyPrice = predictedPrices[0]
+    sellPrice = predictedPrices[30]
+  }
+  
+  const profitPercent = ((sellPrice - buyPrice) / buyPrice) * 100
+  
+  return {
+    dates,
+    predictedPrices,
+    buyDate,
+    sellDate,
+    buyPrice,
+    sellPrice,
+    profitPercent
+  }
+}
+
 export async function generateDetailedExplanation(
   prediction: PredictionResult,
   symbol: string,
