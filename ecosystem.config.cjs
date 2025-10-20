@@ -11,6 +11,18 @@ module.exports = {
       watch: false,
       instances: 1,
       exec_mode: 'fork'
+    },
+    {
+      name: 'ml-api',
+      script: 'python3',
+      args: '-m uvicorn main:app --host 0.0.0.0 --port 8080',
+      cwd: './ml_api',
+      env: {
+        PYTHONUNBUFFERED: '1'
+      },
+      watch: false,
+      instances: 1,
+      exec_mode: 'fork'
     }
   ]
 }

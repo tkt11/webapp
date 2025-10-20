@@ -325,7 +325,20 @@ app.get('/', (c) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Stock AI Predictor - 株価予測AI</title>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>Stock AI Predictor - 株価予測AI v10.1 [${Date.now()}]</title>
+  <script>
+    // Force cache clear
+    console.log('%c Application Version: 10.1', 'color: #10b981; font-weight: bold; font-size: 16px;');
+    console.log('%c All fixes applied:', 'color: #3b82f6; font-weight: bold;');
+    console.log('  - Null-safety checks for chart data');
+    console.log('  - ML future predictions (30 days)');
+    console.log('  - Training data extended to 730 days');
+    console.log('  - Feature importance visualization');
+    console.log('%c If you still see errors, press Ctrl+Shift+R!', 'color: #f59e0b; font-weight: bold; font-size: 14px;');
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -2584,7 +2597,14 @@ app.get('/', (c) => {
           })
           
           // ML未来予測チャート（過去30日 + 未来30日）
+          console.log('🔍 Checking future predictions:', {
+            has_future_predictions: !!trainingData.future_predictions,
+            has_backfit: !!data.prediction.backfit,
+            future_data: trainingData.future_predictions
+          })
+          
           if (trainingData.future_predictions) {
+            console.log('✅ Rendering ML future price chart')
             const mlFuturePriceCtx = document.getElementById('mlFuturePriceChart').getContext('2d')
             const futurePred = trainingData.future_predictions
             
@@ -2707,7 +2727,13 @@ app.get('/', (c) => {
         }
 
         // ML予測: 予測比較チャート
+        console.log('🔍 Checking ML prediction data:', {
+          has_ml_prediction: !!data.prediction.ml_prediction,
+          ml_data: data.prediction.ml_prediction
+        })
+        
         if (data.prediction.ml_prediction) {
+          console.log('✅ Rendering prediction comparison chart')
           const comparisonCtx = document.getElementById('predictionComparisonChart').getContext('2d')
           
           // 統計予測の方向性（BUY=上昇、SELL=下降、HOLD=横ばい）

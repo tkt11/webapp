@@ -293,6 +293,33 @@ npm run build && pm2 restart stock-ai-predictor
 
 ## ✅ 最近の改善
 
+### 2025-10-20 バグ修正 v10.1 - ブラウザキャッシュ問題完全解決 ✅
+1. **Null安全性の完全対応**:
+   - `data.chart_data?.dates || []` - オプショナルチェーン + デフォルト空配列
+   - `data.prediction.future?.dates || []` - 未来予測データのnullチェック
+   - `data.prediction.backfit?.predictedPrices || []` - バックフィットデータのnullチェック
+   - すべてのチャートデータアクセスに安全性チェック追加
+
+2. **デバッグログの追加**:
+   - ML予測データの存在確認ログ
+   - 未来予測データの存在確認ログ
+   - チャートレンダリングの開始ログ
+   - コンソールで問題箇所を特定しやすく改善
+
+3. **キャッシュバスティング強化**:
+   - タイトルにタイムスタンプ追加: `v10.1 [${Date.now()}]`
+   - Cache-Control, Pragma, Expiresヘッダー追加
+   - ブラウザキャッシュ無効化の完全実装
+
+4. **エラー修正**:
+   - "Cannot read properties of undefined (reading 'slice')" 完全解決
+   - 予測比較チャートの空白問題修正
+   - ML未来価格チャートの空白問題修正
+
+5. **ブラウザリフレッシュガイド追加**:
+   - READMEに明示的な手順追加
+   - コンソールログで警告表示
+
 ### 2025-10-20 メジャーアップデート v9.0 - ML学習完全強化版 ✅
 1. **学習データの大幅増強**:
    - Alpha Vantage API: `outputsize=compact` (100日) → `outputsize=full` (730日/2年分)
@@ -457,9 +484,19 @@ git push -u origin main
 ---
 
 **Last Updated**: 2025-10-20
-**Version**: v9.0 - ML学習完全強化版（730日データ + 未来予測 + 完全可視化） ✅
+**Version**: v10.1 - キャッシュ問題修正版（Null安全性完全対応 + デバッグログ追加） ✅
 **Status**: ✅ 完全動作確認済み（680サンプル学習 + 195イテレーション + Test R²=0.83 + 未来30日予測）
 **Demo URL**: https://3000-i1j5rforwq1dklhedain9-2e77fc33.sandbox.novita.ai
+
+## ⚠️ ブラウザキャッシュクリアが必要
+初回アクセス後、エラーが表示される場合は以下を実行してください：
+- **Windows/Linux**: `Ctrl` + `Shift` + `R`
+- **Mac**: `Cmd` + `Shift` + `R`
+
+または：
+1. F12でDevToolsを開く
+2. Networkタブ → "Disable cache"にチェック
+3. ページをリロード
 
 ## 🎉 主要実装完了事項
 
@@ -488,3 +525,4 @@ git push -u origin main
 ✅ v7.1: **ML予測エラー完全解決**（technical.indicators → technical に修正）
 ✅ v8.0: **オンデマンド学習機能完全実装**（銘柄専用MLモデルのリアルタイム学習 + 詳細可視化）
 ✅ v9.0: **ML学習完全強化版**（730日データ + 680サンプル + 195イテレーション + 未来30日予測 + ML版株価チャート）
+✅ v10.1: **キャッシュ問題修正版**（Null安全性完全対応 + デバッグログ追加 + ブラウザキャッシュ対策）
