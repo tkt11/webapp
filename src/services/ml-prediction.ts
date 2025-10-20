@@ -3,7 +3,8 @@
  * Calls external LightGBM API for machine learning-based stock prediction
  */
 
-const ML_API_URL = 'https://stock-ml-api-621848899229.asia-northeast1.run.app';
+// 開発環境ではローカルML API、本番環境ではCloud Run ML API
+const ML_API_URL = 'http://localhost:8080';
 
 export interface MLPredictionRequest {
   symbol: string;

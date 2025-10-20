@@ -32,13 +32,14 @@ app.get('/api/health', (c) => {
 // 銘柄分析API
 app.post('/api/analyze', async (c) => {
   try {
-    const { symbol } = await c.req.json()
+    const { symbol, trainModel = false } = await c.req.json()
     
     if (!symbol) {
       return c.json({ error: '銘柄コードが必要です' }, 400)
     }
     
     const env = c.env
+    console.log(`Analyzing ${symbol} with trainModel=${trainModel}`)
     
     // 並列でデータ取得
     const [
