@@ -2253,11 +2253,17 @@ app.get('/', (c) => {
         // Chart.jsでグラフ表示（過去実績 + 未来予測）
         const ctx = document.getElementById('priceChart').getContext('2d')
         
-        // 過去30日と未来30日のデータを結合
-        const allDates = [...data.chart_data.dates, ...data.prediction.future.dates.slice(1)]
-        const historicalPrices = [...data.chart_data.prices]
-        const backfitPrices = [...data.prediction.backfit.predictedPrices]
-        const futurePrices = [null, ...data.prediction.future.predictedPrices.slice(1)]
+        // 過去30日と未来30日のデータを結合（データ存在チェック）
+        const chartDates = data.chart_data?.dates || []
+        const chartPrices = data.chart_data?.prices || []
+        const futureDates = data.prediction.future?.dates || []
+        const futurePredictedPrices = data.prediction.future?.predictedPrices || []
+        const backfitPredictedPrices = data.prediction.backfit?.predictedPrices || []
+        
+        const allDates = [...chartDates, ...(futureDates.length > 0 ? futureDates.slice(1) : [])]
+        const historicalPrices = [...chartPrices]
+        const backfitPrices = [...backfitPredictedPrices]
+        const futurePrices = [null, ...(futurePredictedPrices.length > 0 ? futurePredictedPrices.slice(1) : [])]
         
         // 過去データをnullで埋める
         const historicalData = [...historicalPrices, ...new Array(futurePrices.length - 1).fill(null)]
