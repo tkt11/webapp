@@ -6,7 +6,7 @@ import { performFundamentalAnalysis } from './services/fundamental'
 import { performSentimentAnalysis } from './services/sentiment'
 import { analyzeMacroEconomics } from './services/macro'
 import { analyzeAnalystRating } from './services/analyst'
-import { generatePrediction, generateDetailedExplanation, generateFuturePrediction } from './services/prediction'
+import { generatePrediction, generateDetailedExplanation, generateFuturePrediction, generateBackfitPrediction } from './services/prediction'
 import { runInvestmentSimulation, runBacktest } from './services/simulation'
 import {
   fetchStockPrices,
@@ -99,13 +99,22 @@ app.post('/api/analyze', async (c) => {
       stockData.prices.slice(-30)
     )
     
+    // 過去30日の予測(バックフィット)を生成し精度評価
+    const backfitPrediction = generateBackfitPrediction(
+      stockData.dates.slice(-30),
+      stockData.prices.slice(-30),
+      prediction.score,
+      technical
+    )
+    
     return c.json({
       symbol,
       current_price: currentPrice,
       prediction: {
         ...prediction,
         detailed_explanation: detailedExplanation,
-        future: futurePrediction
+        future: futurePrediction,
+        backfit: backfitPrediction
       },
       analysis: {
         technical,
@@ -684,27 +693,27 @@ app.get('/', (c) => {
             </div>
 
             <div class="grid grid-cols-5 gap-4 mb-6">
-              <div class="score-card text-center" onclick="showDetailModal('technical')">
+              <div id="card-technical" class="score-card text-center cursor-pointer hover:shadow-lg transition">
                 <p class="text-sm text-gray-600 mb-1"><i class="fas fa-chart-line mr-1"></i>テクニカル</p>
                 <p class="text-2xl font-bold text-blue-600">\${data.prediction.breakdown.technical}</p>
                 <p class="text-xs text-gray-500 mt-1">クリックして詳細表示</p>
               </div>
-              <div class="score-card text-center" onclick="showDetailModal('fundamental')">
+              <div id="card-fundamental" class="score-card text-center cursor-pointer hover:shadow-lg transition">
                 <p class="text-sm text-gray-600 mb-1"><i class="fas fa-building mr-1"></i>ファンダメンタル</p>
                 <p class="text-2xl font-bold text-green-600">\${data.prediction.breakdown.fundamental}</p>
                 <p class="text-xs text-gray-500 mt-1">クリックして詳細表示</p>
               </div>
-              <div class="score-card text-center" onclick="showDetailModal('sentiment')">
+              <div id="card-sentiment" class="score-card text-center cursor-pointer hover:shadow-lg transition">
                 <p class="text-sm text-gray-600 mb-1"><i class="fas fa-newspaper mr-1"></i>センチメント</p>
                 <p class="text-2xl font-bold text-yellow-600">\${data.prediction.breakdown.sentiment}</p>
                 <p class="text-xs text-gray-500 mt-1">クリックして詳細表示</p>
               </div>
-              <div class="score-card text-center" onclick="showDetailModal('macro')">
+              <div id="card-macro" class="score-card text-center cursor-pointer hover:shadow-lg transition">
                 <p class="text-sm text-gray-600 mb-1"><i class="fas fa-globe mr-1"></i>マクロ経済</p>
                 <p class="text-2xl font-bold text-purple-600">\${data.prediction.breakdown.macro}</p>
                 <p class="text-xs text-gray-500 mt-1">クリックして詳細表示</p>
               </div>
-              <div class="score-card text-center" onclick="showDetailModal('analyst')">
+              <div id="card-analyst" class="score-card text-center cursor-pointer hover:shadow-lg transition">
                 <p class="text-sm text-gray-600 mb-1"><i class="fas fa-user-tie mr-1"></i>アナリスト</p>
                 <p class="text-2xl font-bold text-red-600">\${data.prediction.breakdown.analyst}</p>
                 <p class="text-xs text-gray-500 mt-1">クリックして詳細表示</p>
@@ -716,9 +725,43 @@ app.get('/', (c) => {
               <canvas id="radarChart" style="max-height: 300px;"></canvas>
             </div>
 
+            <!-- 信頼度基準ガイド -->
+            <div class="bg-gradient-to-r from-gray-50 to-blue-50 p-6 rounded-lg mb-6">
+              <h4 class="font-bold text-xl mb-4 text-center"><i class="fas fa-shield-alt mr-2"></i>信頼度基準ガイド</h4>
+              <div class="grid grid-cols-3 gap-4 mb-4">
+                <div class="bg-white p-4 rounded-lg shadow border-l-4 border-green-500">
+                  <p class="text-lg font-bold text-green-600 mb-2">信頼度 70%以上</p>
+                  <p class="text-sm text-gray-700">✅ <strong>積極推奨:</strong> 高い確信度での投資判断が可能</p>
+                  <p class="text-xs text-gray-500 mt-2">各次元のスコアが一致し、予測の信頼性が非常に高い状態</p>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow border-l-4 border-yellow-500">
+                  <p class="text-lg font-bold text-yellow-600 mb-2">信頼度 50-70%</p>
+                  <p class="text-sm text-gray-700">⚠️ <strong>慎重推奨:</strong> 慎重な判断を推奨</p>
+                  <p class="text-xs text-gray-500 mt-2">一部の次元でスコアにばらつきあり、追加分析を推奨</p>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow border-l-4 border-red-500">
+                  <p class="text-lg font-bold text-red-600 mb-2">信頼度 50%未満</p>
+                  <p class="text-sm text-gray-700">❌ <strong>非推奨:</strong> 投資判断を見送ることを推奨</p>
+                  <p class="text-xs text-gray-500 mt-2">スコアのばらつきが大きく、予測の信頼性が低い状態</p>
+                </div>
+              </div>
+              <div class="bg-indigo-50 p-4 rounded-lg">
+                <p class="text-sm font-bold mb-2">現在の信頼度: <span class="text-2xl \${data.prediction.confidence >= 70 ? 'text-green-600' : data.prediction.confidence >= 50 ? 'text-yellow-600' : 'text-red-600'}">\${data.prediction.confidence}%</span></p>
+                <p class="text-sm text-gray-700">
+                  \${data.prediction.confidence >= 70 ? '✅ この銘柄は高信頼度で投資推奨されます' : 
+                     data.prediction.confidence >= 50 ? '⚠️ この銘柄は慎重な判断が必要です' : 
+                     '❌ この銘柄は現時点で投資を見送ることを推奨します'}
+                </p>
+              </div>
+            </div>
+
             <!-- BUY/SELL推奨タイミングと利益予測 -->
             <div class="bg-gradient-to-r from-green-50 to-blue-50 p-6 rounded-lg mb-6">
-              <h4 class="font-bold text-xl mb-4 text-center"><i class="fas fa-coins mr-2"></i>投資戦略推奨</h4>
+              <h4 class="font-bold text-xl mb-4 text-center"><i class="fas fa-coins mr-2"></i>投資戦略推奨 (中長期)</h4>
+              <p class="text-sm text-gray-600 text-center mb-4">
+                <i class="fas fa-info-circle mr-1"></i>
+                推奨売却日は<strong>予測期間内の最高値日</strong>を表示(BUY判定時)
+              </p>
               <div class="grid grid-cols-3 gap-4 mb-4">
                 <div class="bg-white p-4 rounded-lg shadow">
                   <p class="text-sm text-gray-600 mb-2"><i class="fas fa-calendar-check mr-1"></i>推奨購入日</p>
@@ -726,7 +769,7 @@ app.get('/', (c) => {
                   <p class="text-sm text-gray-500 mt-1">$\${data.prediction.future.buyPrice.toFixed(2)}</p>
                 </div>
                 <div class="bg-white p-4 rounded-lg shadow">
-                  <p class="text-sm text-gray-600 mb-2"><i class="fas fa-calendar-times mr-1"></i>推奨売却日</p>
+                  <p class="text-sm text-gray-600 mb-2"><i class="fas fa-calendar-times mr-1"></i>推奨売却日 (最高値予測日)</p>
                   <p class="text-xl font-bold text-red-600">\${data.prediction.future.sellDate}</p>
                   <p class="text-sm text-gray-500 mt-1">$\${data.prediction.future.sellPrice.toFixed(2)}</p>
                 </div>
@@ -740,11 +783,93 @@ app.get('/', (c) => {
                   </p>
                 </div>
               </div>
+              
+              <!-- 短期トレード推奨 -->
+              <div class="bg-white p-4 rounded-lg shadow mb-4">
+                <h5 class="font-bold text-lg mb-3 text-indigo-700"><i class="fas fa-bolt mr-2"></i>短期トレード推奨 (デイトレード〜スイング)</h5>
+                <div class="grid grid-cols-3 gap-4">
+                  <div class="bg-indigo-50 p-3 rounded">
+                    <p class="text-xs text-gray-600 mb-1">3日後売却</p>
+                    <p class="text-lg font-bold text-indigo-600">
+                      \${(() => {
+                        const idx = 3
+                        const price = data.prediction.future.predictedPrices[idx]
+                        const profit = ((price - data.prediction.future.buyPrice) / data.prediction.future.buyPrice * 100)
+                        return (profit >= 0 ? '+' : '') + profit.toFixed(2) + '%'
+                      })()}
+                    </p>
+                    <p class="text-xs text-gray-500">\${data.prediction.future.dates[3]}</p>
+                  </div>
+                  <div class="bg-indigo-50 p-3 rounded">
+                    <p class="text-xs text-gray-600 mb-1">7日後売却</p>
+                    <p class="text-lg font-bold text-indigo-600">
+                      \${(() => {
+                        const idx = 7
+                        const price = data.prediction.future.predictedPrices[idx]
+                        const profit = ((price - data.prediction.future.buyPrice) / data.prediction.future.buyPrice * 100)
+                        return (profit >= 0 ? '+' : '') + profit.toFixed(2) + '%'
+                      })()}
+                    </p>
+                    <p class="text-xs text-gray-500">\${data.prediction.future.dates[7]}</p>
+                  </div>
+                  <div class="bg-indigo-50 p-3 rounded">
+                    <p class="text-xs text-gray-600 mb-1">14日後売却</p>
+                    <p class="text-lg font-bold text-indigo-600">
+                      \${(() => {
+                        const idx = 14
+                        const price = data.prediction.future.predictedPrices[idx]
+                        const profit = ((price - data.prediction.future.buyPrice) / data.prediction.future.buyPrice * 100)
+                        return (profit >= 0 ? '+' : '') + profit.toFixed(2) + '%'
+                      })()}
+                    </p>
+                    <p class="text-xs text-gray-500">\${data.prediction.future.dates[14]}</p>
+                  </div>
+                </div>
+                <p class="text-xs text-gray-600 mt-3 text-center">
+                  <i class="fas fa-lightbulb mr-1 text-yellow-500"></i>
+                  短期トレードは方向性的中率が高い場合に有効です
+                </p>
+              </div>
+              
               <div class="bg-yellow-50 border-l-4 border-yellow-500 p-4 rounded">
                 <p class="text-sm text-gray-700">
                   <i class="fas fa-exclamation-circle mr-2 text-yellow-600"></i>
                   <strong>重要:</strong> この予測は過去データと現在のスコアに基づく統計的推定です。
                   実際の市場は予測通りに動かない可能性があります。投資は自己責任で行ってください。
+                </p>
+              </div>
+            </div>
+
+            <!-- 予測精度指標 -->
+            <div class="bg-gradient-to-r from-purple-50 to-indigo-50 p-6 rounded-lg mb-6">
+              <h4 class="font-bold text-xl mb-4 text-center"><i class="fas fa-chart-bar mr-2"></i>予測精度評価 (過去30日)</h4>
+              <div class="grid grid-cols-4 gap-4 mb-4">
+                <div class="bg-white p-4 rounded-lg shadow text-center">
+                  <p class="text-sm text-gray-600 mb-2">RMSE (平均二乗誤差)</p>
+                  <p class="text-2xl font-bold text-purple-600">$\${data.prediction.backfit.accuracy.rmse.toFixed(2)}</p>
+                  <p class="text-xs text-gray-500 mt-1">低いほど高精度</p>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow text-center">
+                  <p class="text-sm text-gray-600 mb-2">MAE (平均絶対誤差)</p>
+                  <p class="text-2xl font-bold text-indigo-600">$\${data.prediction.backfit.accuracy.mae.toFixed(2)}</p>
+                  <p class="text-xs text-gray-500 mt-1">低いほど高精度</p>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow text-center">
+                  <p class="text-sm text-gray-600 mb-2">MAPE (平均誤差率)</p>
+                  <p class="text-2xl font-bold text-blue-600">\${data.prediction.backfit.accuracy.mape.toFixed(2)}%</p>
+                  <p class="text-xs text-gray-500 mt-1">低いほど高精度</p>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow text-center">
+                  <p class="text-sm text-gray-600 mb-2">方向性的中率</p>
+                  <p class="text-2xl font-bold text-green-600">\${data.prediction.backfit.accuracy.directionAccuracy.toFixed(1)}%</p>
+                  <p class="text-xs text-gray-500 mt-1">上昇/下降の判定</p>
+                </div>
+              </div>
+              <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
+                <p class="text-sm text-gray-700">
+                  <i class="fas fa-info-circle mr-2 text-blue-600"></i>
+                  <strong>精度評価:</strong> 過去30日のデータに対して同じ予測アルゴリズムを適用し、実績と比較した結果です。
+                  方向性的中率が60%以上であれば、予測の信頼性が比較的高いと判断できます。
                 </p>
               </div>
             </div>
@@ -793,10 +918,12 @@ app.get('/', (c) => {
         // 過去30日と未来30日のデータを結合
         const allDates = [...data.chart_data.dates, ...data.prediction.future.dates.slice(1)]
         const historicalPrices = [...data.chart_data.prices]
+        const backfitPrices = [...data.prediction.backfit.predictedPrices]
         const futurePrices = [null, ...data.prediction.future.predictedPrices.slice(1)]
         
         // 過去データをnullで埋める
         const historicalData = [...historicalPrices, ...new Array(futurePrices.length - 1).fill(null)]
+        const backfitData = [...backfitPrices, ...new Array(futurePrices.length - 1).fill(null)]
         const futureData = [...new Array(historicalPrices.length - 1).fill(null), ...futurePrices]
         
         new Chart(ctx, {
@@ -815,7 +942,18 @@ app.get('/', (c) => {
                 pointRadius: 2
               },
               {
-                label: '株価予測 (未来30日)',
+                label: '予測 (過去30日バックフィット)',
+                data: backfitData,
+                borderColor: 'rgb(139, 92, 246)',
+                backgroundColor: 'transparent',
+                borderWidth: 2,
+                borderDash: [3, 3],
+                tension: 0.1,
+                fill: false,
+                pointRadius: 1
+              },
+              {
+                label: '予測 (未来30日)',
                 data: futureData,
                 borderColor: 'rgb(249, 115, 22)',
                 backgroundColor: 'rgba(249, 115, 22, 0.1)',
@@ -944,6 +1082,13 @@ app.get('/', (c) => {
             }
           }
         })
+
+        // スコアカードにイベントリスナーを追加
+        document.getElementById('card-technical').addEventListener('click', () => showDetailModal('technical'))
+        document.getElementById('card-fundamental').addEventListener('click', () => showDetailModal('fundamental'))
+        document.getElementById('card-sentiment').addEventListener('click', () => showDetailModal('sentiment'))
+        document.getElementById('card-macro').addEventListener('click', () => showDetailModal('macro'))
+        document.getElementById('card-analyst').addEventListener('click', () => showDetailModal('analyst'))
 
       } catch (error) {
         alert('エラー: ' + (error.response?.data?.error || error.message))
@@ -1480,7 +1625,7 @@ app.get('/', (c) => {
               </div>
               <div class="bg-blue-50 p-3 rounded">
                 <p class="text-sm text-gray-600">分析ニュース総数</p>
-                <p class="text-2xl font-bold text-blue-600">\${sent.total_articles || 0}件</p>
+                <p class="text-2xl font-bold text-blue-600">\${sent.news_count || 0}件</p>
               </div>
             </div>
 

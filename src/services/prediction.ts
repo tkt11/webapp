@@ -300,6 +300,118 @@ export function generateFuturePrediction(
   }
 }
 
+// 過去30日の予測を生成し、実績と比較して精度を評価
+export function generateBackfitPrediction(
+  historicalDates: string[],
+  historicalPrices: number[],
+  finalScore: number,
+  technical: TechnicalAnalysis
+): {
+  dates: string[],
+  actualPrices: number[],
+  predictedPrices: number[],
+  accuracy: {
+    rmse: number,
+    mae: number,
+    mape: number,
+    directionAccuracy: number
+  }
+} {
+  // 過去30日分の予測を生成(ランダム要素なしの決定論的予測)
+  const predictedPrices: number[] = []
+  
+  // 過去のボラティリティを計算(最初の20日間のみ使用)
+  const returns = []
+  for (let i = 1; i < Math.min(20, historicalPrices.length); i++) {
+    returns.push((historicalPrices[i] - historicalPrices[i-1]) / historicalPrices[i-1])
+  }
+  const avgReturn = returns.reduce((a, b) => a + b, 0) / returns.length
+  
+  // スコアから予測トレンドを計算
+  let dailyTrendPercent = 0
+  if (finalScore >= 75) {
+    dailyTrendPercent = 0.5
+  } else if (finalScore >= 60) {
+    dailyTrendPercent = 0.3
+  } else if (finalScore >= 40) {
+    dailyTrendPercent = 0
+  } else if (finalScore >= 25) {
+    dailyTrendPercent = -0.3
+  } else {
+    dailyTrendPercent = -0.5
+  }
+  
+  // テクニカル指標から追加調整
+  if (technical.indicators) {
+    if (technical.indicators.rsi > 70) {
+      dailyTrendPercent -= 0.15
+    } else if (technical.indicators.rsi < 30) {
+      dailyTrendPercent += 0.15
+    }
+    
+    if (technical.indicators.macd > 0) {
+      dailyTrendPercent += 0.1
+    } else {
+      dailyTrendPercent -= 0.1
+    }
+  }
+  
+  // 過去30日分の予測を生成(決定論的 - ランダムなし)
+  let price = historicalPrices[0]
+  predictedPrices.push(price)
+  
+  for (let i = 1; i < historicalPrices.length; i++) {
+    const dailyChange = dailyTrendPercent / 100
+    price = price * (1 + dailyChange)
+    predictedPrices.push(price)
+  }
+  
+  // 精度指標を計算
+  let sumSquaredError = 0
+  let sumAbsoluteError = 0
+  let sumPercentageError = 0
+  let correctDirections = 0
+  
+  for (let i = 1; i < historicalPrices.length; i++) {
+    const actual = historicalPrices[i]
+    const predicted = predictedPrices[i]
+    
+    // RMSE用
+    sumSquaredError += Math.pow(actual - predicted, 2)
+    
+    // MAE用
+    sumAbsoluteError += Math.abs(actual - predicted)
+    
+    // MAPE用
+    sumPercentageError += Math.abs((actual - predicted) / actual)
+    
+    // 方向性の正解率
+    const actualDirection = historicalPrices[i] > historicalPrices[i-1] ? 'up' : 'down'
+    const predictedDirection = predictedPrices[i] > predictedPrices[i-1] ? 'up' : 'down'
+    if (actualDirection === predictedDirection) {
+      correctDirections++
+    }
+  }
+  
+  const n = historicalPrices.length - 1
+  const rmse = Math.sqrt(sumSquaredError / n)
+  const mae = sumAbsoluteError / n
+  const mape = (sumPercentageError / n) * 100
+  const directionAccuracy = (correctDirections / n) * 100
+  
+  return {
+    dates: historicalDates,
+    actualPrices: historicalPrices,
+    predictedPrices,
+    accuracy: {
+      rmse: Math.round(rmse * 100) / 100,
+      mae: Math.round(mae * 100) / 100,
+      mape: Math.round(mape * 100) / 100,
+      directionAccuracy: Math.round(directionAccuracy * 100) / 100
+    }
+  }
+}
+
 export async function generateDetailedExplanation(
   prediction: PredictionResult,
   symbol: string,
