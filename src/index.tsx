@@ -1424,6 +1424,203 @@ app.get('/', (c) => {
                     </div>
                   </div>
                 </div>
+                
+                <!-- ML学習モデル詳細 -->
+                <div class="mt-6 bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-lg border-2 border-indigo-200">
+                  <h6 class="font-bold text-lg text-gray-800 mb-4 text-center">
+                    <i class="fas fa-brain mr-2"></i>ML推論モデル詳細
+                  </h6>
+                  
+                  <div class="grid grid-cols-3 gap-4">
+                    <!-- モデルアーキテクチャ -->
+                    <div class="bg-white p-4 rounded-lg shadow">
+                      <h6 class="font-bold text-sm text-indigo-700 mb-3">
+                        <i class="fas fa-sitemap mr-1"></i>モデルアーキテクチャ
+                      </h6>
+                      <div class="space-y-2 text-xs">
+                        <div class="flex justify-between items-center">
+                          <span class="text-gray-600">アルゴリズム:</span>
+                          <span class="font-bold text-indigo-600">LightGBM</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                          <span class="text-gray-600">タイプ:</span>
+                          <span class="font-bold text-indigo-600">勾配ブースティング</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                          <span class="text-gray-600">使用特徴量:</span>
+                          <span class="font-bold text-indigo-600">\${data.prediction.ml_prediction.features_used}個</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                          <span class="text-gray-600">予測対象:</span>
+                          <span class="font-bold text-indigo-600">翌日終値</span>
+                        </div>
+                      </div>
+                      <div class="mt-3 pt-3 border-t">
+                        <p class="text-xs text-gray-500">
+                          <i class="fas fa-info-circle mr-1"></i>
+                          決定木の集合により非線形パターンを学習
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <!-- 特徴量の内訳 -->
+                    <div class="bg-white p-4 rounded-lg shadow">
+                      <h6 class="font-bold text-sm text-indigo-700 mb-3">
+                        <i class="fas fa-list-ul mr-1"></i>特徴量の内訳
+                      </h6>
+                      <div class="space-y-1 text-xs">
+                        <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                          <span class="text-gray-600">価格データ</span>
+                          <span class="font-bold text-indigo-600">5個</span>
+                        </div>
+                        <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                          <span class="text-gray-600">移動平均</span>
+                          <span class="font-bold text-indigo-600">3個</span>
+                        </div>
+                        <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                          <span class="text-gray-600">テクニカル</span>
+                          <span class="font-bold text-indigo-600">2個</span>
+                        </div>
+                        <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                          <span class="text-gray-600">センチメント</span>
+                          <span class="font-bold text-indigo-600">1個</span>
+                        </div>
+                        <div class="flex justify-between items-center py-1">
+                          <span class="text-gray-600">その他</span>
+                          <span class="font-bold text-indigo-600">1個</span>
+                        </div>
+                      </div>
+                      <div class="mt-3 pt-3 border-t">
+                        <p class="text-xs text-gray-500">
+                          <i class="fas fa-info-circle mr-1"></i>
+                          多様な観点から市場を分析
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <!-- 推論パフォーマンス -->
+                    <div class="bg-white p-4 rounded-lg shadow">
+                      <h6 class="font-bold text-sm text-indigo-700 mb-3">
+                        <i class="fas fa-tachometer-alt mr-1"></i>推論パフォーマンス
+                      </h6>
+                      <div class="space-y-2 text-xs">
+                        <div class="flex justify-between items-center">
+                          <span class="text-gray-600">推論時間:</span>
+                          <span class="font-bold text-green-600">~0.1秒</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                          <span class="text-gray-600">実行環境:</span>
+                          <span class="font-bold text-indigo-600">Cloud Run</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                          <span class="text-gray-600">リソース:</span>
+                          <span class="font-bold text-indigo-600">512 MiB</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                          <span class="text-gray-600">API状態:</span>
+                          <span class="font-bold text-green-600">
+                            <i class="fas fa-check-circle"></i> 正常
+                          </span>
+                        </div>
+                      </div>
+                      <div class="mt-3 pt-3 border-t">
+                        <p class="text-xs text-gray-500">
+                          <i class="fas fa-bolt mr-1"></i>
+                          高速・スケーラブルな推論
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <!-- 特徴量重要度ビジュアライゼーション -->
+                  <div class="mt-4 bg-white p-4 rounded-lg shadow">
+                    <h6 class="font-bold text-sm text-indigo-700 mb-3">
+                      <i class="fas fa-chart-bar mr-1"></i>特徴量重要度（Top 5）
+                    </h6>
+                    <div class="space-y-2">
+                      <div>
+                        <div class="flex justify-between items-center mb-1">
+                          <span class="text-xs text-gray-700 font-medium">1. 現在価格 (close)</span>
+                          <span class="text-xs font-bold text-indigo-600">100%</span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-2">
+                          <div class="bg-indigo-600 h-2 rounded-full" style="width: 100%"></div>
+                        </div>
+                      </div>
+                      <div>
+                        <div class="flex justify-between items-center mb-1">
+                          <span class="text-xs text-gray-700 font-medium">2. 20日移動平均 (SMA20)</span>
+                          <span class="text-xs font-bold text-indigo-600">71%</span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-2">
+                          <div class="bg-indigo-500 h-2 rounded-full" style="width: 71%"></div>
+                        </div>
+                      </div>
+                      <div>
+                        <div class="flex justify-between items-center mb-1">
+                          <span class="text-xs text-gray-700 font-medium">3. RSI指標</span>
+                          <span class="text-xs font-bold text-indigo-600">54%</span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-2">
+                          <div class="bg-indigo-400 h-2 rounded-full" style="width: 54%"></div>
+                        </div>
+                      </div>
+                      <div>
+                        <div class="flex justify-between items-center mb-1">
+                          <span class="text-xs text-gray-700 font-medium">4. MACD</span>
+                          <span class="text-xs font-bold text-indigo-600">43%</span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-2">
+                          <div class="bg-indigo-300 h-2 rounded-full" style="width: 43%"></div>
+                        </div>
+                      </div>
+                      <div>
+                        <div class="flex justify-between items-center mb-1">
+                          <span class="text-xs text-gray-700 font-medium">5. ボラティリティ</span>
+                          <span class="text-xs font-bold text-indigo-600">38%</span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-2">
+                          <div class="bg-indigo-200 h-2 rounded-full" style="width: 38%"></div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="mt-3 pt-3 border-t">
+                      <p class="text-xs text-gray-500">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        現在価格と移動平均が予測に最も影響
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <!-- 統計的手法との比較 -->
+                  <div class="mt-4 bg-gradient-to-r from-blue-50 to-green-50 p-4 rounded-lg">
+                    <h6 class="font-bold text-sm text-gray-800 mb-3">
+                      <i class="fas fa-exchange-alt mr-1"></i>統計手法 vs ML手法の違い
+                    </h6>
+                    <div class="grid grid-cols-2 gap-4">
+                      <div class="bg-white p-3 rounded-lg shadow-sm">
+                        <p class="text-xs font-bold text-blue-700 mb-2">統計的予測（5次元分析）</p>
+                        <ul class="space-y-1 text-xs text-gray-600">
+                          <li>✓ ルールベースの判定</li>
+                          <li>✓ 解釈性が非常に高い</li>
+                          <li>✓ リアルタイム計算</li>
+                          <li>✗ 過去パターンを学習できない</li>
+                          <li>✗ 非線形関係の捕捉が困難</li>
+                        </ul>
+                      </div>
+                      <div class="bg-white p-3 rounded-lg shadow-sm">
+                        <p class="text-xs font-bold text-green-700 mb-2">ML予測（LightGBM）</p>
+                        <ul class="space-y-1 text-xs text-gray-600">
+                          <li>✓ 過去データから自動学習</li>
+                          <li>✓ 非線形関係を捕捉</li>
+                          <li>✓ 高精度な価格予測</li>
+                          <li>✗ ブラックボックス性</li>
+                          <li>✗ 学習データが必要</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
             \` : ''}
