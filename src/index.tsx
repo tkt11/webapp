@@ -655,8 +655,8 @@ app.get('/', (c) => {
                 <p class="text-lg text-gray-600 mt-2">
                   信頼度: \${data.prediction.confidence}%
                   <i class="fas fa-info-circle ml-1 text-blue-500 cursor-pointer" 
-                     title="信頼度は判定の確実性を示します。スコアが極端（0-20または80-100）なほど信頼度が高くなります。" 
-                     onclick="alert('【信頼度とは】\\n\\n判定の確実性を示す指標です。\\n\\n• 高信頼度（80-100%）: 強いBUYまたはSELL判定\\n• 中信頼度（40-80%）: 中程度の判定\\n• 低信頼度（0-40%）: HOLD（様子見）推奨\\n\\n信頼度は総合スコアの極端さで決まります。')"></i>
+                     title="信頼度は判定の確実性を示します。スコアと一致度が高いほど信頼度が上がります。" 
+                     onclick="alert('【信頼度とは】\\n\\n判定の確実性を示す指標です。\\n\\n【スコアと信頼度の関係】\\n• 75点以上: 信頼度75-100% (強いBUY)\\n• 60-75点: 信頼度60-75% (中程度のBUY)\\n• 40-60点: 信頼度40-60% (HOLD/様子見)\\n• 40点未満: 信頼度60-100% (SELL)\\n\\n【重要な注意点】\\n総合スコアが高くても信頼度が低い場合は、\\n各分析次元の結果にばらつきがあります。\\n例: テクニカル85点でもファンダメンタル40点など\\n\\n信頼度が低い場合は慎重に判断してください。')"></i>
                 </p>
               </div>
             </div>
@@ -744,24 +744,104 @@ app.get('/', (c) => {
         document.getElementById('analysis-result').innerHTML = resultHTML
         document.getElementById('analysis-result').style.display = 'block'
 
-        // Chart.jsでグラフ表示
+        // Chart.jsでグラフ表示（実績株価 + 移動平均線）
         const ctx = document.getElementById('priceChart').getContext('2d')
+        
+        // 移動平均線の計算（20日移動平均）
+        const calculateSMA = (prices, period) => {
+          const sma = []
+          for (let i = 0; i < prices.length; i++) {
+            if (i < period - 1) {
+              sma.push(null)
+            } else {
+              const sum = prices.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0)
+              sma.push(sum / period)
+            }
+          }
+          return sma
+        }
+        
+        const sma20 = calculateSMA(data.chart_data.prices, 20)
+        
         new Chart(ctx, {
           type: 'line',
           data: {
             labels: data.chart_data.dates,
-            datasets: [{
-              label: '株価 (USD)',
-              data: data.chart_data.prices,
-              borderColor: 'rgb(59, 130, 246)',
-              backgroundColor: 'rgba(59, 130, 246, 0.1)',
-              tension: 0.1
-            }]
+            datasets: [
+              {
+                label: '株価 (実績)',
+                data: data.chart_data.prices,
+                borderColor: 'rgb(59, 130, 246)',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                borderWidth: 2,
+                tension: 0.1,
+                fill: true
+              },
+              {
+                label: '20日移動平均 (予測トレンド)',
+                data: sma20,
+                borderColor: 'rgb(249, 115, 22)',
+                backgroundColor: 'transparent',
+                borderWidth: 2,
+                borderDash: [5, 5],
+                tension: 0.1,
+                fill: false,
+                pointRadius: 0
+              }
+            ]
           },
           options: {
             responsive: true,
+            interaction: {
+              mode: 'index',
+              intersect: false
+            },
             plugins: {
-              legend: { display: true }
+              legend: { 
+                display: true,
+                position: 'top'
+              },
+              tooltip: {
+                callbacks: {
+                  title: function(context) {
+                    return '日付: ' + context[0].label
+                  },
+                  afterBody: function(context) {
+                    // 5次元分析データを表示
+                    return [
+                      '',
+                      '【5次元分析スコア】',
+                      'テクニカル: ' + data.prediction.breakdown.technical + '点',
+                      'ファンダメンタル: ' + data.prediction.breakdown.fundamental + '点',
+                      'センチメント: ' + data.prediction.breakdown.sentiment + '点',
+                      'マクロ経済: ' + data.prediction.breakdown.macro + '点',
+                      'アナリスト: ' + data.prediction.breakdown.analyst + '点',
+                      '',
+                      '総合判定: ' + data.prediction.action + ' (スコア: ' + data.prediction.score + '点)'
+                    ]
+                  }
+                },
+                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                titleColor: '#fff',
+                bodyColor: '#fff',
+                padding: 12,
+                displayColors: true
+              }
+            },
+            scales: {
+              y: {
+                beginAtZero: false,
+                title: {
+                  display: true,
+                  text: '株価 (USD)'
+                }
+              },
+              x: {
+                title: {
+                  display: true,
+                  text: '日付'
+                }
+              }
             }
           }
         })
@@ -1124,12 +1204,16 @@ app.get('/', (c) => {
 
     // 詳細モーダル表示
     function showDetailModal(dimension) {
+      console.log('showDetailModal called with dimension:', dimension)
+      console.log('currentAnalysisData:', window.currentAnalysisData)
+      
       if (!window.currentAnalysisData) {
         alert('先に銘柄分析を実行してください')
         return
       }
       
       const data = window.currentAnalysisData
+      console.log('Analysis data loaded:', data)
       const modal = document.getElementById('detailModal')
       const modalBody = document.getElementById('modal-body')
       

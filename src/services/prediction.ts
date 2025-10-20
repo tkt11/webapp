@@ -41,20 +41,55 @@ export function generatePrediction(
     macroScore * weights.macro +
     analystScore * weights.analyst
   
-  // アクション判定
+  // アクション判定と信頼度計算
   let action: 'BUY' | 'SELL' | 'HOLD'
-  let confidence: number
+  let baseConfidence: number
   
-  if (finalScore >= 65) {
+  // 判定ロジック:
+  // - 75点以上: 強いBUY（高信頼度）
+  // - 60-75点: 中程度のBUY（中信頼度）
+  // - 40-60点: HOLD（様子見、低-中信頼度）
+  // - 25-40点: 中程度のSELL（中信頼度）
+  // - 25点未満: 強いSELL（高信頼度）
+  
+  if (finalScore >= 75) {
+    // 強いBUY判定
     action = 'BUY'
-    confidence = Math.min(95, ((finalScore - 65) / 35) * 100)
-  } else if (finalScore <= 35) {
-    action = 'SELL'
-    confidence = Math.min(95, ((35 - finalScore) / 35) * 100)
-  } else {
+    // 75点→75%、100点→100%の信頼度
+    baseConfidence = Math.min(100, 75 + (finalScore - 75))
+  } else if (finalScore >= 60) {
+    // 中程度のBUY判定
+    action = 'BUY'
+    // 60点→60%、75点→75%の信頼度
+    baseConfidence = Math.round(finalScore)
+  } else if (finalScore >= 40) {
+    // HOLD判定（様子見）
     action = 'HOLD'
-    confidence = Math.max(50, 100 - Math.abs(50 - finalScore) * 2)
+    // 50点に近いほど信頼度が低い（迷いが大きい）
+    baseConfidence = Math.round(40 + Math.abs(50 - finalScore))
+  } else if (finalScore >= 25) {
+    // 中程度のSELL判定
+    action = 'SELL'
+    // 25点→75%、40点→60%の信頼度（反転）
+    baseConfidence = Math.round(100 - finalScore)
+  } else {
+    // 強いSELL判定
+    action = 'SELL'
+    // 0点→100%、25点→75%の信頼度
+    baseConfidence = Math.min(100, 100 - finalScore)
   }
+  
+  // 各次元のばらつきを考慮して信頼度を調整
+  // スコアのばらつきが大きい場合、信頼度を下げる
+  const scores = [techScore, fundScore, sentScore, macroScore, analystScore]
+  const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length
+  const variance = scores.reduce((sum, score) => sum + Math.pow(score - avgScore, 2), 0) / scores.length
+  const stdDev = Math.sqrt(variance)
+  
+  // 標準偏差が大きい（ばらつきが大きい）ほど信頼度を減らす
+  // 標準偏差0→減少なし、標準偏差20以上→最大20%減少
+  const variancePenalty = Math.min(20, stdDev * 0.8)
+  const confidence = Math.max(1, Math.round(baseConfidence - variancePenalty))
   
   // 理由の収集
   const reasons: string[] = []
