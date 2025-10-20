@@ -292,6 +292,13 @@ npm run build && pm2 restart stock-ai-predictor
 
 ## ✅ 最近の改善
 
+### 2025-10-20 バグ修正 v7.1 - ML予測エラー完全解決 ✅
+1. **Critical Bug Fix**: `technical.indicators.rsi` → `technical.rsi` に修正
+   - ML予測APIの `TypeError: Cannot read properties of undefined` エラーを解決
+   - `generateMLPrediction`, `generateFuturePrediction`, `generateBackfitPrediction` の3箇所を修正
+2. **ML予測が正常動作**: 予測価格、信頼度、特徴量重要度が正しく表示されるようになりました
+3. **動作確認済み**: AAPL で ML予測価格 $257.44 を取得成功
+
 ### 2025-10-20 メジャーアップデート v7 - デュアル予測システム完全実装 ✅
 1. **デュアル予測システム**: 統計予測（SMA-Based）とML予測（LightGBM）を並列表示
    - 統計予測: 5次元分析による総合スコアと判定
@@ -403,8 +410,8 @@ git push -u origin main
 ---
 
 **Last Updated**: 2025-10-20
-**Version**: v7 - デュアル予測システム完全実装 ✅
-**Status**: ✅ 完全動作確認済み（GPT-4o + デュアル予測 + ML詳細ビジュアライゼーション + 予測一致度分析）
+**Version**: v7.1 - ML予測エラー完全解決 ✅
+**Status**: ✅ 完全動作確認済み（GPT-4o + デュアル予測 + ML詳細ビジュアライゼーション + 予測一致度分析 + ML予測修正）
 **Demo URL**: https://3000-i1j5rforwq1dklhedain9-2e77fc33.sandbox.novita.ai
 
 ## 🎉 主要実装完了事項
@@ -431,3 +438,4 @@ git push -u origin main
 ✅ v7: **予測比較チャート**（現在価格 vs 統計予測 vs ML予測）
 ✅ v7: **MLモデル性能指標表示**（MAE, RMSE, R²スコア、学習サンプル数）
 ✅ v7: **学習データ詳細情報**（データ期間、学習日数、最終学習日）
+✅ v7.1: **ML予測エラー完全解決**（technical.indicators → technical に修正）
