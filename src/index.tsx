@@ -1966,7 +1966,7 @@ app.get('/', (c) => {
               </div>
 
               <!-- 特徴量重要度 -->
-              <div class="bg-white p-6 rounded-lg shadow-lg">
+              <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
                 <h5 class="font-bold text-lg text-gray-800 mb-4">
                   <i class="fas fa-list-ol mr-2"></i>特徴量重要度ランキング（Top 10）
                 </h5>
@@ -1976,6 +1976,42 @@ app.get('/', (c) => {
                   モデルが予測に最も重視した特徴量（Gain-based）
                 </p>
               </div>
+
+              <!-- ML版株価チャート（過去30日 + 未来30日予測） -->
+              \${data.prediction.ml_training.future_predictions ? \`
+              <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+                <h5 class="font-bold text-lg text-gray-800 mb-4">
+                  <i class="fas fa-chart-area mr-2"></i>ML版株価予測（過去30日 + 未来30日）
+                </h5>
+                <canvas id="mlFuturePriceChart" style="max-height: 400px;"></canvas>
+                <p class="text-xs text-gray-600 mt-3 text-center">
+                  <i class="fas fa-info-circle mr-1"></i>
+                  青線: 過去の実績価格 | 緑線: ML予測価格 | 灰色エリア: 信頼区間（±5%）
+                </p>
+                
+                <!-- 予測サマリー -->
+                <div class="mt-4 grid grid-cols-3 gap-4">
+                  <div class="bg-blue-50 p-3 rounded text-center">
+                    <p class="text-xs text-gray-600 mb-1">30日後予測価格</p>
+                    <p class="text-xl font-bold text-blue-600">
+                      $\${data.prediction.ml_training.future_predictions.predictions[29].toFixed(2)}
+                    </p>
+                  </div>
+                  <div class="bg-green-50 p-3 rounded text-center">
+                    <p class="text-xs text-gray-600 mb-1">予測変化率</p>
+                    <p class="text-xl font-bold \${((data.prediction.ml_training.future_predictions.predictions[29] - data.current_price) / data.current_price * 100) >= 0 ? 'text-green-600' : 'text-red-600'}">
+                      \${((data.prediction.ml_training.future_predictions.predictions[29] - data.current_price) / data.current_price * 100) >= 0 ? '+' : ''}\${((data.prediction.ml_training.future_predictions.predictions[29] - data.current_price) / data.current_price * 100).toFixed(2)}%
+                    </p>
+                  </div>
+                  <div class="bg-purple-50 p-3 rounded text-center">
+                    <p class="text-xs text-gray-600 mb-1">予測最高値</p>
+                    <p class="text-xl font-bold text-purple-600">
+                      $\${Math.max(...data.prediction.ml_training.future_predictions.predictions).toFixed(2)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              \` : ''}
 
               <!-- 学習成功メッセージ -->
               <div class="mt-6 bg-green-50 border-2 border-green-300 p-4 rounded-lg text-center">
@@ -2540,6 +2576,128 @@ app.get('/', (c) => {
               }
             }
           })
+          
+          // ML未来予測チャート（過去30日 + 未来30日）
+          if (trainingData.future_predictions) {
+            const mlFuturePriceCtx = document.getElementById('mlFuturePriceChart').getContext('2d')
+            const futurePred = trainingData.future_predictions
+            
+            // 過去30日のデータ（予測の backfit から）
+            const historicalDates = data.prediction.backfit ? data.prediction.backfit.dates.slice(-30) : []
+            const historicalPrices = data.prediction.backfit ? data.prediction.backfit.actual.slice(-30) : []
+            
+            // 全体のラベル: 過去30日 + 未来30日
+            const allLabels = [...historicalDates, ...futurePred.dates]
+            
+            // 過去データ: 最初の30個は実データ、残りはnull
+            const historicalData = [...historicalPrices, ...Array(futurePred.predictions.length).fill(null)]
+            
+            // 未来予測データ: 最初の30個はnull、残りは予測値
+            const futureData = [...Array(historicalPrices.length).fill(null), ...futurePred.predictions]
+            
+            // 信頼区間
+            const lowerBoundData = [...Array(historicalPrices.length).fill(null), ...futurePred.lower_bound]
+            const upperBoundData = [...Array(historicalPrices.length).fill(null), ...futurePred.upper_bound]
+            
+            new Chart(mlFuturePriceCtx, {
+              type: 'line',
+              data: {
+                labels: allLabels,
+                datasets: [
+                  {
+                    label: '実績価格（過去30日）',
+                    data: historicalData,
+                    borderColor: 'rgb(59, 130, 246)',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 2,
+                    pointHoverRadius: 5
+                  },
+                  {
+                    label: 'ML予測価格（未来30日）',
+                    data: futureData,
+                    borderColor: 'rgb(34, 197, 94)',
+                    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 2,
+                    pointHoverRadius: 5,
+                    borderDash: [5, 5]
+                  },
+                  {
+                    label: '信頼区間上限（+5%）',
+                    data: upperBoundData,
+                    borderColor: 'rgba(156, 163, 175, 0.3)',
+                    backgroundColor: 'rgba(156, 163, 175, 0.1)',
+                    borderWidth: 1,
+                    tension: 0.3,
+                    fill: '+1',
+                    pointRadius: 0
+                  },
+                  {
+                    label: '信頼区間下限（-5%）',
+                    data: lowerBoundData,
+                    borderColor: 'rgba(156, 163, 175, 0.3)',
+                    backgroundColor: 'rgba(156, 163, 175, 0.1)',
+                    borderWidth: 1,
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 0
+                  }
+                ]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                  mode: 'index',
+                  intersect: false
+                },
+                plugins: {
+                  legend: {
+                    display: true,
+                    position: 'top'
+                  },
+                  tooltip: {
+                    callbacks: {
+                      label: function(context) {
+                        if (context.parsed.y !== null) {
+                          return context.dataset.label + ': $' + context.parsed.y.toFixed(2)
+                        }
+                        return null
+                      }
+                    }
+                  }
+                },
+                scales: {
+                  y: {
+                    beginAtZero: false,
+                    title: {
+                      display: true,
+                      text: '株価 (USD)'
+                    }
+                  },
+                  x: {
+                    title: {
+                      display: true,
+                      text: '日付'
+                    },
+                    ticks: {
+                      maxRotation: 45,
+                      minRotation: 45,
+                      callback: function(value, index) {
+                        // 5日ごとにラベル表示
+                        return index % 5 === 0 ? this.getLabelForValue(value) : ''
+                      }
+                    }
+                  }
+                }
+              }
+            })
+          }
         }
 
         // ML予測: 予測比較チャート

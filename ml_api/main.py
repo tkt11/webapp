@@ -60,7 +60,7 @@ initialize_model()
 class PredictionRequest(BaseModel):
     """Stock prediction request schema"""
     symbol: str = Field(..., description="Stock symbol (e.g., AAPL)")
-    prices: List[float] = Field(..., description="Historical prices (last 30 days)", min_items=10, max_items=100)
+    prices: List[float] = Field(..., description="Historical prices (10-1000 days)", min_items=10, max_items=1000)
     rsi: Optional[float] = Field(50.0, ge=0, le=100, description="RSI indicator")
     macd: Optional[float] = Field(0.0, description="MACD value")
     sentiment_score: Optional[float] = Field(50.0, ge=0, le=100, description="Sentiment score")
@@ -137,6 +137,13 @@ class FeatureImportance(BaseModel):
     feature: str
     importance: float
 
+class FuturePrediction(BaseModel):
+    """Future price predictions"""
+    dates: List[str]
+    predictions: List[float]
+    lower_bound: List[float]
+    upper_bound: List[float]
+
 class TrainingResponse(BaseModel):
     """Training response with detailed information"""
     success: bool
@@ -150,6 +157,7 @@ class TrainingResponse(BaseModel):
     training_duration: float  # seconds
     timestamp: str
     message: str
+    future_predictions: Optional[FuturePrediction] = None  # 未来30日予測
 
 class HealthResponse(BaseModel):
     """Health check response"""
@@ -521,6 +529,49 @@ async def train_model(request: Request, data: PredictionRequest):
         for i, fi in enumerate(feature_importance_list[:5], 1):
             print(f"  {i}. {fi.feature}: {fi.importance:.0f}")
         
+        # 未来30日の予測を生成
+        print(f"\n🔮 Generating 30-day future predictions...")
+        future_predictions_list = []
+        future_dates = []
+        
+        # 現在の最新特徴量を取得
+        last_features = X[-1].copy()
+        last_price = prices[-1]
+        
+        # 30日間の予測をシミュレーション
+        for day in range(1, 31):
+            # 未来の日付生成
+            future_date = datetime.now() + pd.Timedelta(days=day)
+            future_dates.append(future_date.strftime('%Y-%m-%d'))
+            
+            # 予測実行
+            pred_price = model.predict([last_features], num_iteration=best_iteration)[0]
+            future_predictions_list.append(float(pred_price))
+            
+            # 次の日のために特徴量を更新（簡易的に現在価格を更新）
+            last_features[0] = pred_price  # price
+            # SMAsも更新（簡易版）
+            last_features[1] = pred_price * 0.99  # sma_5
+            last_features[2] = pred_price * 0.98  # sma_10
+            last_features[3] = pred_price * 0.97  # sma_20
+            last_features[4] = pred_price * 0.96  # sma_50
+        
+        # 信頼区間を計算（±5%の範囲）
+        lower_bound = [p * 0.95 for p in future_predictions_list]
+        upper_bound = [p * 1.05 for p in future_predictions_list]
+        
+        future_pred = FuturePrediction(
+            dates=future_dates,
+            predictions=future_predictions_list,
+            lower_bound=lower_bound,
+            upper_bound=upper_bound
+        )
+        
+        print(f"✅ Future predictions generated: {len(future_predictions_list)} days")
+        print(f"   First day: ${future_predictions_list[0]:.2f}")
+        print(f"   Last day: ${future_predictions_list[-1]:.2f}")
+        print(f"   Change: {((future_predictions_list[-1] - last_price) / last_price * 100):.2f}%")
+        
         # 学習時間計算
         training_duration = (datetime.now() - training_start_time).total_seconds()
         
@@ -580,7 +631,8 @@ async def train_model(request: Request, data: PredictionRequest):
             feature_importances=feature_importance_list,
             training_duration=training_duration,
             timestamp=datetime.now().isoformat(),
-            message=f"Successfully trained custom model for {data.symbol}"
+            message=f"Successfully trained custom model for {data.symbol}",
+            future_predictions=future_pred  # 未来30日予測を追加
         )
         
     except HTTPException:

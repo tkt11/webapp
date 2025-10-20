@@ -45,7 +45,8 @@ export async function fetchStockPrices(symbol: string, apiKey: string): Promise<
   dates: string[]
   current_price: number
 }> {
-  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&apikey=${apiKey}&outputsize=compact`
+  // outputsize=full で最大20年分のデータを取得（学習用に十分なデータ確保）
+  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&apikey=${apiKey}&outputsize=full`
   
   const response = await fetch(url)
   const data = await response.json() as AlphaVantageResponse
@@ -55,8 +56,11 @@ export async function fetchStockPrices(symbol: string, apiKey: string): Promise<
   }
   
   const timeSeries = data['Time Series (Daily)']
-  const dates = Object.keys(timeSeries).sort().slice(-100)
+  // 最新から最大730日分（2年間）を取得してソート
+  const dates = Object.keys(timeSeries).sort().slice(-730)
   const prices = dates.map(date => parseFloat(timeSeries[date]['4. close']))
+  
+  console.log(`Fetched ${prices.length} days of price data for ${symbol}`);
   
   return {
     prices,

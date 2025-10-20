@@ -88,6 +88,13 @@ export interface FeatureImportance {
   importance: number;
 }
 
+export interface FuturePrediction {
+  dates: string[];
+  predictions: number[];
+  lower_bound: number[];
+  upper_bound: number[];
+}
+
 export interface MLTrainingResponse {
   success: boolean;
   model_id: string;
@@ -100,6 +107,7 @@ export interface MLTrainingResponse {
   training_duration: number;
   timestamp: string;
   message: string;
+  future_predictions?: FuturePrediction;  // 未来30日予測
 }
 
 /**
