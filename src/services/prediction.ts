@@ -228,16 +228,16 @@ export function generateFuturePrediction(
   }
   
   // テクニカル指標から追加調整 (nullチェック)
-  if (technical.indicators) {
-    if (technical.indicators.rsi > 70) {
+  if (technical.rsi) {
+    if (technical.rsi > 70) {
       dailyTrendPercent -= 0.15 // 買われすぎ
-    } else if (technical.indicators.rsi < 30) {
+    } else if (technical.rsi < 30) {
       dailyTrendPercent += 0.15 // 売られすぎ
     }
     
-    if (technical.indicators.macd > 0) {
+    if (technical.macd && technical.macd.macd > 0) {
       dailyTrendPercent += 0.1 // 上昇トレンド
-    } else {
+    } else if (technical.macd && technical.macd.macd <= 0) {
       dailyTrendPercent -= 0.1 // 下降トレンド
     }
   }
@@ -338,14 +338,16 @@ export function generateBackfitPrediction(
   }
   
   // テクニカル指標から追加調整
-  if (technical.indicators) {
-    if (technical.indicators.rsi > 70) {
+  if (technical.rsi) {
+    if (technical.rsi > 70) {
       trendStrength -= 0.001
-    } else if (technical.indicators.rsi < 30) {
+    } else if (technical.rsi < 30) {
       trendStrength += 0.001
     }
-    
-    if (technical.indicators.macd > 0) {
+  }
+  
+  if (technical.macd && technical.macd.macd !== undefined) {
+    if (technical.macd.macd > 0) {
       trendStrength += 0.001
     } else {
       trendStrength -= 0.001
@@ -453,7 +455,7 @@ export async function generateMLPrediction(
     const mlResult = await predictWithML(
       symbol,
       historicalPrices,
-      technical.indicators,
+      technical,
       fundamental,
       sentiment.score
     )
