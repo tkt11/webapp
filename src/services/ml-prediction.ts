@@ -95,6 +95,15 @@ export interface FuturePrediction {
   upper_bound: number[];
 }
 
+export interface BackfitPrediction {
+  dates: string[];
+  predictions: number[];
+  actual_prices: number[];
+  rmse: number;
+  mae: number;
+  direction_accuracy: number;
+}
+
 export interface MLTrainingResponse {
   success: boolean;
   model_id: string;
@@ -108,6 +117,7 @@ export interface MLTrainingResponse {
   timestamp: string;
   message: string;
   future_predictions?: FuturePrediction;  // 未来30日予測
+  backfit_predictions?: BackfitPrediction;  // 過去30日バックフィット予測
 }
 
 /**

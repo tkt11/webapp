@@ -2026,6 +2026,48 @@ app.get('/', (c) => {
               </div>
               \` : ''}
 
+              <!-- ML版バックフィットチャート（過去30日の予測精度検証） -->
+              \${data.prediction.ml_training.backfit_predictions ? \`
+              <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+                <h5 class="font-bold text-lg text-gray-800 mb-4">
+                  <i class="fas fa-chart-line mr-2"></i>ML予測精度検証（過去30日バックフィット）
+                </h5>
+                <canvas id="mlBackfitChart" style="max-height: 400px;"></canvas>
+                <p class="text-xs text-gray-600 mt-3 text-center">
+                  <i class="fas fa-info-circle mr-1"></i>
+                  青線: 実際の価格 | オレンジ線: ML予測価格 | MLモデルが過去30日をどれだけ正確に予測できたか検証
+                </p>
+                
+                <!-- バックフィット精度サマリー -->
+                <div class="mt-4 grid grid-cols-3 gap-4">
+                  <div class="bg-blue-50 p-3 rounded text-center">
+                    <p class="text-xs text-gray-600 mb-1">RMSE（誤差）</p>
+                    <p class="text-xl font-bold text-blue-600">
+                      $\${data.prediction.ml_training.backfit_predictions.rmse.toFixed(2)}
+                    </p>
+                  </div>
+                  <div class="bg-green-50 p-3 rounded text-center">
+                    <p class="text-xs text-gray-600 mb-1">MAE（平均誤差）</p>
+                    <p class="text-xl font-bold text-green-600">
+                      $\${data.prediction.ml_training.backfit_predictions.mae.toFixed(2)}
+                    </p>
+                  </div>
+                  <div class="bg-purple-50 p-3 rounded text-center">
+                    <p class="text-xs text-gray-600 mb-1">方向性正解率</p>
+                    <p class="text-xl font-bold text-purple-600">
+                      \${data.prediction.ml_training.backfit_predictions.direction_accuracy.toFixed(1)}%
+                    </p>
+                  </div>
+                </div>
+                <div class="mt-3 bg-yellow-50 border-l-4 border-yellow-500 p-3 rounded">
+                  <p class="text-xs text-gray-700">
+                    <i class="fas fa-lightbulb mr-1 text-yellow-600"></i>
+                    <strong>方向性正解率</strong>: 価格が上がるか下がるかの予測が当たった割合。70%以上なら高精度。
+                  </p>
+                </div>
+              </div>
+              \` : ''}
+
               <!-- 学習成功メッセージ -->
               <div class="mt-6 bg-green-50 border-2 border-green-300 p-4 rounded-lg text-center">
                 <p class="text-lg font-bold text-green-700">
@@ -2065,6 +2107,122 @@ app.get('/', (c) => {
                      data.prediction.confidence >= 50 ? '⚠️ この銘柄は慎重な判断が必要です' : 
                      '❌ この銘柄は現時点で投資を見送ることを推奨します'}
                 </p>
+              </div>
+            </div>
+
+            <!-- 信頼度算出ロジックの詳細説明 -->
+            <div class="bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-lg mb-6 border-2 border-indigo-300">
+              <h4 class="font-bold text-xl mb-4 text-center">
+                <i class="fas fa-calculator mr-2"></i>信頼度の算出方法（統計手法 vs ML手法）
+              </h4>
+              
+              <div class="grid grid-cols-2 gap-6">
+                <!-- 統計手法の信頼度 -->
+                <div class="bg-white p-5 rounded-lg shadow-lg">
+                  <div class="flex items-center mb-3">
+                    <i class="fas fa-chart-bar text-blue-600 text-2xl mr-3"></i>
+                    <h5 class="font-bold text-lg text-blue-800">統計手法（5次元分析）</h5>
+                  </div>
+                  
+                  <div class="space-y-3">
+                    <div class="bg-blue-50 p-3 rounded">
+                      <p class="text-xs font-bold text-blue-800 mb-2">📊 基本計算式</p>
+                      <code class="text-xs bg-blue-100 px-2 py-1 rounded block">
+                        信頼度 = 100 - (標準偏差 × 調整係数)
+                      </code>
+                    </div>
+                    
+                    <div class="bg-gray-50 p-3 rounded">
+                      <p class="text-xs font-bold text-gray-800 mb-2">🔍 計算ロジック</p>
+                      <ul class="text-xs text-gray-700 space-y-1">
+                        <li>1. 5次元スコアを収集（テクニカル、ファンダメンタル等）</li>
+                        <li>2. スコアの標準偏差を計算</li>
+                        <li>3. ばらつきが小さい → 高信頼度</li>
+                        <li>4. ばらつきが大きい → 低信頼度</li>
+                      </ul>
+                    </div>
+                    
+                    <div class="bg-green-50 p-3 rounded">
+                      <p class="text-xs font-bold text-green-800 mb-2">✅ 特徴</p>
+                      <ul class="text-xs text-gray-700 space-y-1">
+                        <li>• 各次元のスコア一貫性を重視</li>
+                        <li>• 解釈性が高い</li>
+                        <li>• リアルタイム計算</li>
+                      </ul>
+                    </div>
+                    
+                    <div class="bg-yellow-50 p-3 rounded border-l-4 border-yellow-500">
+                      <p class="text-xs text-gray-700">
+                        <strong>例:</strong> テクニカル85点、ファンダメンタル40点の場合、
+                        ばらつきが大きいため信頼度が下がる
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- ML手法の信頼度 -->
+                <div class="bg-white p-5 rounded-lg shadow-lg">
+                  <div class="flex items-center mb-3">
+                    <i class="fas fa-brain text-green-600 text-2xl mr-3"></i>
+                    <h5 class="font-bold text-lg text-green-800">ML手法（LightGBM）</h5>
+                  </div>
+                  
+                  <div class="space-y-3">
+                    <div class="bg-green-50 p-3 rounded">
+                      <p class="text-xs font-bold text-green-800 mb-2">📊 基本計算式</p>
+                      <code class="text-xs bg-green-100 px-2 py-1 rounded block">
+                        信頼度 = (R²スコア × 0.7) + ((1 - 正規化RMSE) × 0.3)
+                      </code>
+                    </div>
+                    
+                    <div class="bg-gray-50 p-3 rounded">
+                      <p class="text-xs font-bold text-gray-800 mb-2">🔍 計算ロジック</p>
+                      <ul class="text-xs text-gray-700 space-y-1">
+                        <li>1. テストデータでR²スコア計算（決定係数）</li>
+                        <li>2. RMSE（誤差）を価格で正規化</li>
+                        <li>3. R²スコア70% + 誤差30%で重み付け</li>
+                        <li>4. 100倍してパーセンテージ化</li>
+                      </ul>
+                    </div>
+                    
+                    <div class="bg-purple-50 p-3 rounded">
+                      <p class="text-xs font-bold text-purple-800 mb-2">✅ 特徴</p>
+                      <ul class="text-xs text-gray-700 space-y-1">
+                        <li>• モデルの予測精度を直接反映</li>
+                        <li>• テストデータで検証済み</li>
+                        <li>• 過学習を考慮</li>
+                      </ul>
+                    </div>
+                    
+                    <div class="bg-yellow-50 p-3 rounded border-l-4 border-yellow-500">
+                      <p class="text-xs text-gray-700">
+                        <strong>例:</strong> R²=0.83, RMSE=$11の場合、
+                        高いR²と低いRMSEで高信頼度
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- 比較サマリー -->
+              <div class="mt-4 bg-white p-4 rounded-lg shadow">
+                <p class="text-sm font-bold text-center text-gray-800 mb-2">
+                  <i class="fas fa-balance-scale mr-2"></i>どちらの信頼度を重視すべきか？
+                </p>
+                <div class="grid grid-cols-3 gap-3 text-xs">
+                  <div class="text-center p-2 bg-blue-50 rounded">
+                    <p class="font-bold text-blue-700">統計手法優先</p>
+                    <p class="text-gray-600 mt-1">市場環境が安定</p>
+                  </div>
+                  <div class="text-center p-2 bg-purple-50 rounded">
+                    <p class="font-bold text-purple-700">両方を参考</p>
+                    <p class="text-gray-600 mt-1">通常の分析</p>
+                  </div>
+                  <div class="text-center p-2 bg-green-50 rounded">
+                    <p class="font-bold text-green-700">ML手法優先</p>
+                    <p class="text-gray-600 mt-1">過去パターン重視</p>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -2766,6 +2924,93 @@ app.get('/', (c) => {
             console.log('✅ ML future price chart created successfully')
             } catch (error) {
               console.error('❌ ERROR creating ML future price chart:', error)
+            }
+          }
+          
+          // ML バックフィットチャート（過去30日の予測精度検証）
+          if (trainingData.backfit_predictions) {
+            console.log('✅ Rendering ML backfit chart')
+            const mlBackfitElement = document.getElementById('mlBackfitChart')
+            if (mlBackfitElement) {
+              const mlBackfitCtx = mlBackfitElement.getContext('2d')
+              const backfitData = trainingData.backfit_predictions
+              
+              new Chart(mlBackfitCtx, {
+                type: 'line',
+                data: {
+                  labels: backfitData.dates,
+                  datasets: [
+                    {
+                      label: '実際の価格',
+                      data: backfitData.actual_prices,
+                      borderColor: 'rgb(59, 130, 246)',
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                      borderWidth: 3,
+                      tension: 0.3,
+                      fill: false,
+                      pointRadius: 3,
+                      pointHoverRadius: 6
+                    },
+                    {
+                      label: 'ML予測価格',
+                      data: backfitData.predictions,
+                      borderColor: 'rgb(251, 146, 60)',
+                      backgroundColor: 'rgba(251, 146, 60, 0.1)',
+                      borderWidth: 3,
+                      tension: 0.3,
+                      fill: false,
+                      pointRadius: 3,
+                      pointHoverRadius: 6,
+                      borderDash: [5, 5]
+                    }
+                  ]
+                },
+                options: {
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  interaction: {
+                    mode: 'index',
+                    intersect: false
+                  },
+                  plugins: {
+                    legend: {
+                      display: true,
+                      position: 'top'
+                    },
+                    tooltip: {
+                      callbacks: {
+                        label: function(context) {
+                          return context.dataset.label + ': $' + context.parsed.y.toFixed(2)
+                        }
+                      }
+                    }
+                  },
+                  scales: {
+                    y: {
+                      beginAtZero: false,
+                      title: {
+                        display: true,
+                        text: '株価 (USD)'
+                      }
+                    },
+                    x: {
+                      title: {
+                        display: true,
+                        text: '日付'
+                      },
+                      ticks: {
+                        maxRotation: 45,
+                        minRotation: 45,
+                        callback: function(value, index) {
+                          return index % 5 === 0 ? this.getLabelForValue(value) : ''
+                        }
+                      }
+                    }
+                  }
+                }
+              })
+              
+              console.log('✅ ML backfit chart created successfully')
             }
           }
         }

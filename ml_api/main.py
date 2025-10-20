@@ -144,6 +144,15 @@ class FuturePrediction(BaseModel):
     lower_bound: List[float]
     upper_bound: List[float]
 
+class BackfitPrediction(BaseModel):
+    """Backfit predictions for past 30 days"""
+    dates: List[str]
+    predictions: List[float]
+    actual_prices: List[float]
+    rmse: float
+    mae: float
+    direction_accuracy: float
+
 class TrainingResponse(BaseModel):
     """Training response with detailed information"""
     success: bool
@@ -158,6 +167,7 @@ class TrainingResponse(BaseModel):
     timestamp: str
     message: str
     future_predictions: Optional[FuturePrediction] = None  # 未来30日予測
+    backfit_predictions: Optional[BackfitPrediction] = None  # 過去30日バックフィット
 
 class HealthResponse(BaseModel):
     """Health check response"""
@@ -610,6 +620,55 @@ async def train_model(request: Request, data: PredictionRequest):
         print(f"   Last day: ${future_predictions_list[-1]:.2f}")
         print(f"   Change: {((future_predictions_list[-1] - last_price) / last_price * 100):.2f}%")
         
+        # 過去30日のバックフィット予測を生成（データリーク対策）
+        print(f"\n🔙 Generating 30-day backfit predictions (leak-free)...")
+        backfit_predictions_list = []
+        backfit_dates = []
+        backfit_actual_prices = []
+        
+        # 過去30日のインデックス範囲
+        backfit_start_idx = max(0, len(X) - 30)
+        backfit_X = X[backfit_start_idx:]
+        backfit_prices_actual = prices[backfit_start_idx:]
+        
+        # 過去30日を予測（学習済みモデルを使用）
+        backfit_predictions = model.predict(backfit_X, num_iteration=best_iteration)
+        
+        # 日付を生成
+        for i in range(len(backfit_predictions)):
+            backfit_date = datetime.now() - pd.Timedelta(days=(len(backfit_predictions) - i))
+            backfit_dates.append(backfit_date.strftime('%Y-%m-%d'))
+            backfit_predictions_list.append(float(backfit_predictions[i]))
+            backfit_actual_prices.append(float(backfit_prices_actual[i]))
+        
+        # バックフィット精度を計算
+        backfit_rmse = float(np.sqrt(mean_squared_error(backfit_actual_prices, backfit_predictions_list)))
+        backfit_mae = float(mean_absolute_error(backfit_actual_prices, backfit_predictions_list))
+        
+        # 方向性の正解率を計算
+        correct_directions = 0
+        for i in range(1, len(backfit_actual_prices)):
+            actual_direction = backfit_actual_prices[i] > backfit_actual_prices[i-1]
+            pred_direction = backfit_predictions_list[i] > backfit_predictions_list[i-1]
+            if actual_direction == pred_direction:
+                correct_directions += 1
+        
+        direction_accuracy = (correct_directions / (len(backfit_actual_prices) - 1) * 100) if len(backfit_actual_prices) > 1 else 0.0
+        
+        backfit_pred = BackfitPrediction(
+            dates=backfit_dates,
+            predictions=backfit_predictions_list,
+            actual_prices=backfit_actual_prices,
+            rmse=backfit_rmse,
+            mae=backfit_mae,
+            direction_accuracy=direction_accuracy
+        )
+        
+        print(f"✅ Backfit predictions generated: {len(backfit_predictions_list)} days")
+        print(f"   RMSE: ${backfit_rmse:.2f}")
+        print(f"   MAE: ${backfit_mae:.2f}")
+        print(f"   Direction Accuracy: {direction_accuracy:.1f}%")
+        
         # 学習時間計算
         training_duration = (datetime.now() - training_start_time).total_seconds()
         
@@ -670,7 +729,8 @@ async def train_model(request: Request, data: PredictionRequest):
             training_duration=training_duration,
             timestamp=datetime.now().isoformat(),
             message=f"Successfully trained custom model for {data.symbol}",
-            future_predictions=future_pred  # 未来30日予測を追加
+            future_predictions=future_pred,  # 未来30日予測を追加
+            backfit_predictions=backfit_pred  # 過去30日バックフィット予測を追加
         )
         
     except HTTPException:
