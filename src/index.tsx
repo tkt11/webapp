@@ -449,20 +449,34 @@ app.get('/', (c) => {
           <i class="fas fa-trophy mr-2 text-yellow-500"></i>
           おすすめ銘柄TOP10
         </h2>
-        <p class="text-gray-600 mb-4">
-          S&P 500主要50銘柄を自動分析し、スコア順にTOP10を表示します
-        </p>
+        <div class="bg-blue-50 border-l-4 border-blue-500 p-4 mb-4">
+          <h3 class="font-bold text-blue-800 mb-2">
+            <i class="fas fa-info-circle mr-2"></i>選定ロジック
+          </h3>
+          <div class="text-sm text-gray-700 space-y-1">
+            <p><strong>対象銘柄:</strong> S&P 500主要50社（時価総額上位）から15銘柄を分析</p>
+            <p><strong>選定基準:</strong></p>
+            <ul class="ml-6 list-disc">
+              <li>5次元分析で総合スコアを算出（テクニカル35% + ファンダメンタル30% + センチメント15% + マクロ10% + アナリスト10%）</li>
+              <li>スコア上位10銘柄を推奨</li>
+              <li>BUY判定（スコア75点以上）を優先表示</li>
+              <li>期待リターンと信頼度も考慮</li>
+            </ul>
+            <p><strong>更新頻度:</strong> リアルタイム（ボタンクリック時に最新データで分析）</p>
+            <p class="text-xs text-gray-500 mt-2">※ パフォーマンス最適化のため、現在は15銘柄に限定しています（処理時間: 約15秒）</p>
+          </div>
+        </div>
         <button 
           onclick="loadRecommendations()" 
           class="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-semibold transition"
         >
-          <i class="fas fa-sync-alt mr-2"></i>最新のおすすめを取得
+          <i class="fas fa-sync-alt mr-2"></i>最新のおすすめを取得（15銘柄分析）
         </button>
       </div>
 
       <div id="recommendations-loading" style="display:none;">
         <div class="loader"></div>
-        <p class="text-center text-gray-600">分析中... 最大50銘柄を並列分析しています（約30秒）</p>
+        <p class="text-center text-gray-600">分析中... 15銘柄を並列分析しています（約15秒）</p>
       </div>
 
       <div id="recommendations-result">
@@ -597,6 +611,9 @@ app.get('/', (c) => {
   </div>
 
   <script>
+    // グローバル変数: 分析データを保存
+    window.currentAnalysisData = null
+
     // タブ切り替え
     function switchTab(tabName) {
       document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'))
@@ -622,7 +639,7 @@ app.get('/', (c) => {
         const data = response.data
         
         // グローバルに保存してモーダルから参照可能にする
-        currentAnalysisData = data
+        window.currentAnalysisData = data
 
         const resultHTML = \`
           <div class="bg-white rounded-lg shadow-md p-6 mb-6">
@@ -635,12 +652,22 @@ app.get('/', (c) => {
                 <div class="text-5xl font-bold \${data.prediction.action === 'BUY' ? 'text-green-600' : data.prediction.action === 'SELL' ? 'text-red-600' : 'text-gray-600'}">
                   \${data.prediction.action}
                 </div>
-                <p class="text-lg text-gray-600 mt-2">信頼度: \${data.prediction.confidence}%</p>
+                <p class="text-lg text-gray-600 mt-2">
+                  信頼度: \${data.prediction.confidence}%
+                  <i class="fas fa-info-circle ml-1 text-blue-500 cursor-pointer" 
+                     title="信頼度は判定の確実性を示します。スコアが極端（0-20または80-100）なほど信頼度が高くなります。" 
+                     onclick="alert('【信頼度とは】\\n\\n判定の確実性を示す指標です。\\n\\n• 高信頼度（80-100%）: 強いBUYまたはSELL判定\\n• 中信頼度（40-80%）: 中程度の判定\\n• 低信頼度（0-40%）: HOLD（様子見）推奨\\n\\n信頼度は総合スコアの極端さで決まります。')"></i>
+                </p>
               </div>
             </div>
 
             <div class="mb-6">
-              <h3 class="text-xl font-bold mb-3">総合スコア: \${data.prediction.score}/100</h3>
+              <div class="flex items-center justify-between mb-3">
+                <h3 class="text-xl font-bold">総合スコア: \${data.prediction.score}/100</h3>
+                <i class="fas fa-info-circle text-blue-500 cursor-pointer" 
+                   title="5つの分析を重み付け平均したスコア" 
+                   onclick="alert('【総合スコアとは】\\n\\n5次元分析の加重平均値です：\\n\\n• テクニカル: 35%\\n• ファンダメンタル: 30%\\n• センチメント: 15%\\n• マクロ経済: 10%\\n• アナリスト: 10%\\n\\n【判定基準】\\n• 75点以上: BUY（買い推奨）\\n• 60-75点: HOLD（保持推奨）\\n• 60点未満: SELL（売り推奨）')"></i>
+              </div>
               <div class="bg-gray-200 rounded-full h-6">
                 <div class="score-bar bg-gradient-to-r from-blue-500 to-purple-600" style="width: \${data.prediction.score}%"></div>
               </div>
@@ -1092,17 +1119,17 @@ app.get('/', (c) => {
       }
     }
 
-    // グローバルに分析データを保存
-    let currentAnalysisData = null
+    // グローバルに分析データを保存（analyzeStock関数内で設定）
+    // let currentAnalysisData = null  // 既にグローバルスコープで宣言済み
 
     // 詳細モーダル表示
     function showDetailModal(dimension) {
-      if (!currentAnalysisData) {
+      if (!window.currentAnalysisData) {
         alert('先に銘柄分析を実行してください')
         return
       }
       
-      const data = currentAnalysisData
+      const data = window.currentAnalysisData
       const modal = document.getElementById('detailModal')
       const modalBody = document.getElementById('modal-body')
       
