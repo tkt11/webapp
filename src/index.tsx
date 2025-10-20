@@ -32,14 +32,14 @@ app.get('/api/health', (c) => {
 // 銘柄分析API
 app.post('/api/analyze', async (c) => {
   try {
-    const { symbol, trainModel = false } = await c.req.json()
+    const { symbol, trainModel = false, enableBackfit = false } = await c.req.json()
     
     if (!symbol) {
       return c.json({ error: '銘柄コードが必要です' }, 400)
     }
     
     const env = c.env
-    console.log(`Analyzing ${symbol} with trainModel=${trainModel}`)
+    console.log(`Analyzing ${symbol} with trainModel=${trainModel}, enableBackfit=${enableBackfit}`)
     
     // 並列でデータ取得
     const [
@@ -115,7 +115,8 @@ app.post('/api/analyze', async (c) => {
       technical,
       fundamental,
       sentiment,
-      trainModel  // 学習フラグを渡す
+      trainModel,  // 学習フラグを渡す
+      enableBackfit  // バックフィット検証フラグを渡す
     )
     
     return c.json({
@@ -496,6 +497,35 @@ app.get('/', (c) => {
               <p class="text-xs text-gray-500 mt-2">
                 <i class="fas fa-info-circle mr-1"></i>
                 学習結果は7日間キャッシュされ、次回の予測で再利用されます
+              </p>
+            </div>
+          </div>
+        </div>
+        
+        <!-- バックフィット検証オプション -->
+        <div class="mt-3 bg-gradient-to-r from-blue-50 to-cyan-50 border-2 border-blue-300 rounded-lg p-4">
+          <div class="flex items-start gap-3">
+            <input 
+              type="checkbox" 
+              id="enable-backfit-checkbox" 
+              class="mt-1 w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <div class="flex-1">
+              <label for="enable-backfit-checkbox" class="font-semibold text-gray-800 cursor-pointer">
+                <i class="fas fa-chart-line text-blue-600"></i>
+                バックフィット検証も実施（予測精度の可視化）
+              </label>
+              <p class="text-sm text-gray-600 mt-1">
+                チェックすると、過去30日を除外した別モデルで学習し、その30日の予測精度を検証します。
+                データリークなしで実際のモデル精度を確認できます。
+              </p>
+              <p class="text-xs text-gray-500 mt-2">
+                <i class="fas fa-info-circle mr-1"></i>
+                <strong>仕組み:</strong> 本番用モデル（全データ学習）と検証用モデル（過去30日除外）の2つを学習
+              </p>
+              <p class="text-xs text-blue-600 mt-1">
+                <i class="fas fa-clock mr-1"></i>
+                追加で約5-10秒かかります（別モデル学習のため）
               </p>
             </div>
           </div>
@@ -1145,13 +1175,17 @@ app.get('/', (c) => {
 
       // チェックボックスから学習フラグを取得
       const trainModel = document.getElementById('train-model-checkbox').checked
-      console.log('Train model:', trainModel)
+      const enableBackfit = document.getElementById('enable-backfit-checkbox').checked
+      console.log('Train model:', trainModel, 'Enable backfit:', enableBackfit)
 
       // 動的ローディングメッセージ
       const loadingDiv = document.getElementById('analysis-loading')
-      const loadingMessage = trainModel 
-        ? '分析中... モデル学習を実行しています（約10-30秒）'
-        : '分析中... GPT-4oで詳細分析を実行しています'
+      let loadingMessage = '分析中... GPT-4oで詳細分析を実行しています'
+      if (trainModel && enableBackfit) {
+        loadingMessage = '分析中... モデル学習 + バックフィット検証を実行しています（約15-40秒）'
+      } else if (trainModel) {
+        loadingMessage = '分析中... モデル学習を実行しています（約10-30秒）'
+      }
       
       loadingDiv.innerHTML = \`
         <div class="loader"></div>
@@ -1162,7 +1196,7 @@ app.get('/', (c) => {
       document.getElementById('analysis-result').style.display = 'none'
 
       try {
-        const response = await axios.post('/api/analyze', { symbol, trainModel })
+        const response = await axios.post('/api/analyze', { symbol, trainModel, enableBackfit })
         const data = response.data
         
         // グローバルに保存してモーダルから参照可能にする
@@ -2310,6 +2344,122 @@ app.get('/', (c) => {
                 </p>
               </div>
             </div>
+
+            <!-- ML版投資戦略推奨 (中長期) -->
+            \${data.prediction.ml_training && data.prediction.ml_training.future_predictions ? \`
+            <div class="bg-gradient-to-r from-green-50 to-teal-50 p-6 rounded-lg mb-6 border-2 border-green-300">
+              <h4 class="font-bold text-xl mb-4 text-center">
+                <i class="fas fa-robot mr-2"></i>ML投資戦略推奨 (中長期)
+              </h4>
+              <p class="text-sm text-gray-600 text-center mb-4">
+                <i class="fas fa-brain mr-1"></i>
+                LightGBMモデルによる機械学習ベースの投資戦略（未来30日予測）
+              </p>
+              
+              \${(() => {
+                const predictions = data.prediction.ml_training.future_predictions.predictions
+                const dates = data.prediction.ml_training.future_predictions.dates
+                const buyPrice = data.current_price
+                const buyDate = dates[0]
+                
+                // 最高値を見つける
+                let maxPrice = predictions[0]
+                let maxPriceIdx = 0
+                for (let i = 1; i < predictions.length; i++) {
+                  if (predictions[i] > maxPrice) {
+                    maxPrice = predictions[i]
+                    maxPriceIdx = i
+                  }
+                }
+                const sellPrice = maxPrice
+                const sellDate = dates[maxPriceIdx]
+                const profitPercent = ((sellPrice - buyPrice) / buyPrice * 100)
+                
+                return \`
+                <div class="grid grid-cols-3 gap-4 mb-4">
+                  <div class="bg-white p-4 rounded-lg shadow">
+                    <p class="text-sm text-gray-600 mb-2"><i class="fas fa-calendar-check mr-1"></i>推奨購入日</p>
+                    <p class="text-xl font-bold text-green-600">\${buyDate}</p>
+                    <p class="text-sm text-gray-500 mt-1">$\${buyPrice.toFixed(2)}</p>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg shadow">
+                    <p class="text-sm text-gray-600 mb-2"><i class="fas fa-calendar-times mr-1"></i>推奨売却日 (ML予測最高値)</p>
+                    <p class="text-xl font-bold text-red-600">\${sellDate}</p>
+                    <p class="text-sm text-gray-500 mt-1">$\${sellPrice.toFixed(2)}</p>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg shadow">
+                    <p class="text-sm text-gray-600 mb-2"><i class="fas fa-chart-line mr-1"></i>ML予測利益率</p>
+                    <p class="text-2xl font-bold \${profitPercent >= 0 ? 'text-green-600' : 'text-red-600'}">
+                      \${profitPercent >= 0 ? '+' : ''}\${profitPercent.toFixed(2)}%
+                    </p>
+                    <p class="text-sm text-gray-500 mt-1">
+                      \${profitPercent >= 0 ? '利益見込み' : '損失リスク'}
+                    </p>
+                  </div>
+                </div>
+                
+                <!-- 短期トレード推奨（ML版） -->
+                <div class="bg-white p-4 rounded-lg shadow mb-4">
+                  <h5 class="font-bold text-lg mb-3 text-teal-700"><i class="fas fa-bolt mr-2"></i>ML短期トレード推奨 (デイトレード〜スイング)</h5>
+                  <div class="grid grid-cols-3 gap-4">
+                    <div class="bg-teal-50 p-3 rounded">
+                      <p class="text-xs text-gray-600 mb-1">3日後売却</p>
+                      <p class="text-lg font-bold text-teal-600">
+                        \${(() => {
+                          const idx = 3
+                          const price = predictions[idx]
+                          const profit = ((price - buyPrice) / buyPrice * 100)
+                          return (profit >= 0 ? '+' : '') + profit.toFixed(2) + '%'
+                        })()}
+                      </p>
+                      <p class="text-xs text-gray-500">\${dates[3]}</p>
+                      <p class="text-xs text-gray-600 mt-1">予測価格: $\${predictions[3].toFixed(2)}</p>
+                    </div>
+                    <div class="bg-teal-50 p-3 rounded">
+                      <p class="text-xs text-gray-600 mb-1">7日後売却</p>
+                      <p class="text-lg font-bold text-teal-600">
+                        \${(() => {
+                          const idx = 7
+                          const price = predictions[idx]
+                          const profit = ((price - buyPrice) / buyPrice * 100)
+                          return (profit >= 0 ? '+' : '') + profit.toFixed(2) + '%'
+                        })()}
+                      </p>
+                      <p class="text-xs text-gray-500">\${dates[7]}</p>
+                      <p class="text-xs text-gray-600 mt-1">予測価格: $\${predictions[7].toFixed(2)}</p>
+                    </div>
+                    <div class="bg-teal-50 p-3 rounded">
+                      <p class="text-xs text-gray-600 mb-1">14日後売却</p>
+                      <p class="text-lg font-bold text-teal-600">
+                        \${(() => {
+                          const idx = 14
+                          const price = predictions[idx]
+                          const profit = ((price - buyPrice) / buyPrice * 100)
+                          return (profit >= 0 ? '+' : '') + profit.toFixed(2) + '%'
+                        })()}
+                      </p>
+                      <p class="text-xs text-gray-500">\${dates[14]}</p>
+                      <p class="text-xs text-gray-600 mt-1">予測価格: $\${predictions[14].toFixed(2)}</p>
+                    </div>
+                  </div>
+                  <p class="text-xs text-gray-600 mt-3 text-center">
+                    <i class="fas fa-robot mr-1 text-teal-500"></i>
+                    MLモデルの学習パターンに基づく短期予測（方向性正解率: \${data.prediction.ml_training.backfit_predictions?.direction_accuracy.toFixed(1) || 'N/A'}%）
+                  </p>
+                </div>
+                \`
+              })()}
+              
+              <div class="bg-green-50 border-l-4 border-green-500 p-4 rounded">
+                <p class="text-sm text-gray-700">
+                  <i class="fas fa-lightbulb mr-2 text-green-600"></i>
+                  <strong>ML予測の特徴:</strong> 過去のパターンを学習したモデルによる予測です。
+                  統計的予測と比較して、より複雑な非線形関係を捉えることができます。
+                  両方の予測を参考にして総合的な判断を行うことを推奨します。
+                </p>
+              </div>
+            </div>
+            \` : ''}
 
             <!-- 予測精度指標 -->
             <div class="bg-gradient-to-r from-purple-50 to-indigo-50 p-6 rounded-lg mb-6">

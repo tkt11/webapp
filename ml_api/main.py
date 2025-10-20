@@ -67,6 +67,7 @@ class PredictionRequest(BaseModel):
     pe_ratio: Optional[float] = Field(None, description="P/E ratio")
     roe: Optional[float] = Field(None, description="ROE percentage")
     volume: Optional[float] = Field(None, description="Trading volume")
+    enable_backfit: Optional[bool] = Field(False, description="Enable backfit validation (trains separate model)")
 
     class Config:
         json_schema_extra = {
@@ -620,54 +621,91 @@ async def train_model(request: Request, data: PredictionRequest):
         print(f"   Last day: ${future_predictions_list[-1]:.2f}")
         print(f"   Change: {((future_predictions_list[-1] - last_price) / last_price * 100):.2f}%")
         
-        # 過去30日のバックフィット予測を生成（データリーク対策）
-        print(f"\n🔙 Generating 30-day backfit predictions (leak-free)...")
-        backfit_predictions_list = []
-        backfit_dates = []
-        backfit_actual_prices = []
-        
-        # 過去30日のインデックス範囲
-        backfit_start_idx = max(0, len(X) - 30)
-        backfit_X = X[backfit_start_idx:]
-        backfit_prices_actual = prices[backfit_start_idx:]
-        
-        # 過去30日を予測（学習済みモデルを使用）
-        backfit_predictions = model.predict(backfit_X, num_iteration=best_iteration)
-        
-        # 日付を生成
-        for i in range(len(backfit_predictions)):
-            backfit_date = datetime.now() - pd.Timedelta(days=(len(backfit_predictions) - i))
-            backfit_dates.append(backfit_date.strftime('%Y-%m-%d'))
-            backfit_predictions_list.append(float(backfit_predictions[i]))
-            backfit_actual_prices.append(float(backfit_prices_actual[i]))
-        
-        # バックフィット精度を計算
-        backfit_rmse = float(np.sqrt(mean_squared_error(backfit_actual_prices, backfit_predictions_list)))
-        backfit_mae = float(mean_absolute_error(backfit_actual_prices, backfit_predictions_list))
-        
-        # 方向性の正解率を計算
-        correct_directions = 0
-        for i in range(1, len(backfit_actual_prices)):
-            actual_direction = backfit_actual_prices[i] > backfit_actual_prices[i-1]
-            pred_direction = backfit_predictions_list[i] > backfit_predictions_list[i-1]
-            if actual_direction == pred_direction:
-                correct_directions += 1
-        
-        direction_accuracy = (correct_directions / (len(backfit_actual_prices) - 1) * 100) if len(backfit_actual_prices) > 1 else 0.0
-        
-        backfit_pred = BackfitPrediction(
-            dates=backfit_dates,
-            predictions=backfit_predictions_list,
-            actual_prices=backfit_actual_prices,
-            rmse=backfit_rmse,
-            mae=backfit_mae,
-            direction_accuracy=direction_accuracy
-        )
-        
-        print(f"✅ Backfit predictions generated: {len(backfit_predictions_list)} days")
-        print(f"   RMSE: ${backfit_rmse:.2f}")
-        print(f"   MAE: ${backfit_mae:.2f}")
-        print(f"   Direction Accuracy: {direction_accuracy:.1f}%")
+        # バックフィット検証（オプション: enable_backfitフラグがTrueの場合のみ）
+        backfit_pred = None
+        if data.enable_backfit:
+            # 過去30日のバックフィット予測を生成（データリーク対策）
+            # 別モデルを学習: 最新30日を除外して学習し、その30日を予測
+            print(f"\n🔙 Generating 30-day backfit predictions (leak-free)...")
+            backfit_predictions_list = []
+            backfit_dates = []
+            backfit_actual_prices = []
+            
+            # 過去30日を除外したデータで別モデルを学習
+            backfit_size = 30
+            if len(X) > backfit_size:
+                # 最新30日を除外
+                X_backfit_train = X[:-backfit_size]
+                y_backfit_train = y[:-backfit_size]
+                X_backfit_test = X[-backfit_size:]
+                y_backfit_test = y[-backfit_size:]
+                
+                print(f"   Training backfit model with {len(X_backfit_train)} samples (excluding last {backfit_size} days)")
+                print(f"   📊 Production model uses: {len(X)} samples")
+                print(f"   📊 Backfit model uses: {len(X_backfit_train)} samples (DIFFERENT from production)")
+                print(f"   🎯 Testing on: {len(X_backfit_test)} excluded samples")
+                
+                # バックフィット検証用モデルを学習
+                backfit_train_data = lgb.Dataset(X_backfit_train, label=y_backfit_train, feature_name=feature_names)
+                
+                backfit_model = lgb.train(
+                    params,
+                    backfit_train_data,
+                    num_boost_round=num_boost_round,
+                    valid_sets=[backfit_train_data],
+                    valid_names=['train'],
+                    callbacks=[
+                        lgb.early_stopping(stopping_rounds=50, verbose=False)
+                    ]
+                )
+                
+                print(f"   ✅ Backfit model trained (model ID: {id(backfit_model)})")
+                print(f"   ✅ Production model ID: {id(model)} (DIFFERENT object)")
+                
+                # 除外した30日を予測
+                backfit_predictions = backfit_model.predict(X_backfit_test, num_iteration=backfit_model.best_iteration)
+                backfit_actual = y_backfit_test
+                
+                # 日付を生成
+                for i in range(len(backfit_predictions)):
+                    backfit_date = datetime.now() - pd.Timedelta(days=(backfit_size - i))
+                    backfit_dates.append(backfit_date.strftime('%Y-%m-%d'))
+                    backfit_predictions_list.append(float(backfit_predictions[i]))
+                    backfit_actual_prices.append(float(backfit_actual[i]))
+                
+                # バックフィット精度を計算
+                backfit_rmse = float(np.sqrt(mean_squared_error(backfit_actual_prices, backfit_predictions_list)))
+                backfit_mae = float(mean_absolute_error(backfit_actual_prices, backfit_predictions_list))
+                
+                # 方向性の正解率を計算
+                correct_directions = 0
+                for i in range(1, len(backfit_actual_prices)):
+                    actual_direction = backfit_actual_prices[i] > backfit_actual_prices[i-1]
+                    pred_direction = backfit_predictions_list[i] > backfit_predictions_list[i-1]
+                    if actual_direction == pred_direction:
+                        correct_directions += 1
+                
+                direction_accuracy = (correct_directions / (len(backfit_actual_prices) - 1) * 100) if len(backfit_actual_prices) > 1 else 0.0
+                
+                backfit_pred = BackfitPrediction(
+                    dates=backfit_dates,
+                    predictions=backfit_predictions_list,
+                    actual_prices=backfit_actual_prices,
+                    rmse=backfit_rmse,
+                    mae=backfit_mae,
+                    direction_accuracy=direction_accuracy
+                )
+                
+                print(f"✅ Backfit predictions generated: {len(backfit_predictions_list)} days")
+                print(f"   RMSE: ${backfit_rmse:.2f}")
+                print(f"   MAE: ${backfit_mae:.2f}")
+                print(f"   Direction Accuracy: {direction_accuracy:.1f}%")
+            else:
+                # データ不足の場合はNone
+                backfit_pred = None
+                print(f"⚠️  Insufficient data for backfit validation (need > {backfit_size} samples)")
+        else:
+            print(f"⏭️  Backfit validation skipped (enable_backfit=False)")
         
         # 学習時間計算
         training_duration = (datetime.now() - training_start_time).total_seconds()

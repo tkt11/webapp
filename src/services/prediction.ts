@@ -455,20 +455,22 @@ export async function generateMLPrediction(
   technical: TechnicalAnalysis,
   fundamental: FundamentalAnalysis,
   sentiment: SentimentAnalysis,
-  trainModel: boolean = false
+  trainModel: boolean = false,
+  enableBackfit: boolean = false
 ): Promise<{ prediction: MLPredictionResponse | null; training: MLTrainingResponse | null }> {
   try {
     let trainingResult: MLTrainingResponse | null = null;
 
     // 学習フラグがONの場合、モデルを学習
     if (trainModel) {
-      console.log(`Training custom model for ${symbol}...`);
+      console.log(`Training custom model for ${symbol} (backfit: ${enableBackfit})...`);
       trainingResult = await trainMLModel(
         symbol,
         historicalPrices,
         technical,
         fundamental,
-        sentiment.score
+        sentiment.score,
+        enableBackfit
       );
       
       if (!trainingResult) {

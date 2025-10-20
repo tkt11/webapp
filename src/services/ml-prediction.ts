@@ -15,6 +15,7 @@ export interface MLPredictionRequest {
   pe_ratio?: number;
   roe?: number;
   volume?: number;
+  enable_backfit?: boolean;
 }
 
 export interface MLPredictionResponse {
@@ -174,7 +175,8 @@ export async function trainMLModel(
   prices: number[],
   technicalData: any,
   fundamentalData: any,
-  sentimentScore: number
+  sentimentScore: number,
+  enableBackfit: boolean = false
 ): Promise<MLTrainingResponse | null> {
   try {
     const requestData: MLPredictionRequest = {
@@ -185,7 +187,8 @@ export async function trainMLModel(
       sentiment_score: sentimentScore,
       pe_ratio: fundamentalData.pe_ratio,
       roe: fundamentalData.roe,
-      volume: prices.length > 0 ? 1000000 : undefined
+      volume: prices.length > 0 ? 1000000 : undefined,
+      enable_backfit: enableBackfit
     };
 
     console.log(`Training model for ${symbol} with ${requestData.prices.length} price points...`);
