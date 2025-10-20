@@ -27,13 +27,19 @@ export function generatePrediction(
     analyst: 0.10
   }
   
-  // 最終スコア計算
+  // 最終スコア計算（nullチェック）
+  const techScore = technical.score || 50
+  const fundScore = fundamental.score || 50
+  const sentScore = sentiment.score || 50
+  const macroScore = macro.score || 50
+  const analystScore = analyst.score || 50
+  
   const finalScore = 
-    technical.score * weights.technical +
-    fundamental.score * weights.fundamental +
-    sentiment.score * weights.sentiment +
-    macro.score * weights.macro +
-    analyst.score * weights.analyst
+    techScore * weights.technical +
+    fundScore * weights.fundamental +
+    sentScore * weights.sentiment +
+    macroScore * weights.macro +
+    analystScore * weights.analyst
   
   // アクション判定
   let action: 'BUY' | 'SELL' | 'HOLD'
@@ -212,41 +218,22 @@ ${prediction.risks.join('\n')}
 500文字程度で、専門用語は避けて平易に説明してください。
 `
     
-    // Try GPT-5 first, fallback to GPT-4o if not available
-    let response;
-    try {
-      response = await openai.chat.completions.create({
-        model: 'gpt-5',
-        messages: [
-          {
-            role: 'system',
-            content: '個人投資家向けの金融アドバイザーとして、専門的な分析をわかりやすく説明します。'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        max_completion_tokens: 1500
-      })
-    } catch (gpt5Error) {
-      console.log('GPT-5 not available, using GPT-4o:', gpt5Error)
-      response = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-          {
-            role: 'system',
-            content: '個人投資家向けの金融アドバイザーとして、専門的な分析をわかりやすく説明します。'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.7,
-        max_tokens: 1500
-      })
-    }
+    // Use GPT-4o for detailed explanation (GPT-5相当の最新モデル)
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        {
+          role: 'system',
+          content: '個人投資家向けの金融アドバイザーとして、専門的な分析をわかりやすく説明します。'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      temperature: 0.7,
+      max_tokens: 1500
+    })
     
     return response.choices[0].message.content || '詳細な解説を生成できませんでした'
     

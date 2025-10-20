@@ -13,12 +13,33 @@ export async function runInvestmentSimulation(
   // 過去の株価データを取得
   const { prices, dates } = await fetchStockPrices(symbol, apiKey)
   
-  // 購入日と売却日のインデックスを検索
-  const purchaseIndex = dates.findIndex(d => d === purchaseDate)
-  const sellIndex = dates.findIndex(d => d === sellDate)
+  // 購入日と売却日のインデックスを検索（柔軟な日付マッチング）
+  const findClosestDateIndex = (targetDate: string): number => {
+    const target = new Date(targetDate).getTime()
+    let closestIndex = 0
+    let minDiff = Infinity
+    
+    dates.forEach((date, index) => {
+      const current = new Date(date).getTime()
+      const diff = Math.abs(current - target)
+      if (diff < minDiff) {
+        minDiff = diff
+        closestIndex = index
+      }
+    })
+    
+    return closestIndex
+  }
+  
+  const purchaseIndex = findClosestDateIndex(purchaseDate)
+  const sellIndex = findClosestDateIndex(sellDate)
   
   if (purchaseIndex === -1 || sellIndex === -1) {
-    throw new Error('指定された日付のデータが見つかりません')
+    throw new Error(`指定された日付のデータが見つかりません。利用可能な日付範囲: ${dates[0]} ~ ${dates[dates.length-1]}`)
+  }
+  
+  if (dates.length < 2) {
+    throw new Error('十分な株価データがありません')
   }
   
   if (purchaseIndex >= sellIndex) {
@@ -140,8 +161,26 @@ export async function runBacktest(
   
   const { prices, dates } = await fetchStockPrices(symbol, apiKey)
   
-  const testIndex = dates.findIndex(d => d === testDate)
-  if (testIndex === -1) {
+  // 柔軟な日付マッチングを使用
+  const findClosestDateIndex = (targetDate: string): number => {
+    const target = new Date(targetDate).getTime()
+    let closestIndex = 0
+    let minDiff = Infinity
+    
+    dates.forEach((date, index) => {
+      const current = new Date(date).getTime()
+      const diff = Math.abs(current - target)
+      if (diff < minDiff) {
+        minDiff = diff
+        closestIndex = index
+      }
+    })
+    
+    return closestIndex
+  }
+  
+  const testIndex = findClosestDateIndex(testDate)
+  if (testIndex === -1 || dates.length === 0) {
     throw new Error('指定された日付のデータが見つかりません')
   }
   

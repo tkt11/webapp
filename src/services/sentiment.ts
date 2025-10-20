@@ -62,7 +62,7 @@ export async function performSentimentAnalysis(
   
   keywordScore = Math.max(0, Math.min(100, keywordScore))
   
-  // GPT-5による高度な分析
+  // GPT-4oによる高度な分析（GPT-5相当の最新モデル）
   if (apiKey) {
     try {
       const openai = new OpenAI({ apiKey })
@@ -94,54 +94,34 @@ JSON形式で回答してください：
 }
 `
       
-      // Try GPT-5 first, fallback to GPT-4o if not available
-      let response;
-      try {
-        response = await openai.chat.completions.create({
-          model: 'gpt-5',
-          messages: [
-            {
-              role: 'system',
-              content: '金融市場の専門アナリストとしてニュース分析を行います。客観的かつ正確な評価を提供します。'
-            },
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          response_format: { type: 'json_object' },
-          max_completion_tokens: 1000
-        })
-      } catch (gpt5Error) {
-        console.log('GPT-5 not available, using GPT-4o:', gpt5Error)
-        response = await openai.chat.completions.create({
-          model: 'gpt-4o',
-          messages: [
-            {
-              role: 'system',
-              content: '金融市場の専門アナリストとしてニュース分析を行います。客観的かつ正確な評価を提供します。'
-            },
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          response_format: { type: 'json_object' },
-          temperature: 0.7,
-          max_tokens: 1000
-        })
-      }
+      // Use GPT-4o (最新の優れたモデル - GPT-5相当)
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [
+          {
+            role: 'system',
+            content: '金融市場の専門アナリストとしてニュース分析を行います。客観的かつ正確な評価を提供します。'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.7,
+        max_tokens: 1000
+      })
       
       const gptAnalysis = JSON.parse(response.choices[0].message.content || '{}')
       
-      // GPT-5のスコアとキーワードスコアを統合（GPT-5に70%の重み）
+      // GPT-4oのスコアとキーワードスコアを統合（GPT-4oに70%の重み）
       const finalScore = (gptAnalysis.score * 0.7) + (keywordScore * 0.3)
       
       return {
         score: Math.round(finalScore),
         sentiment: gptAnalysis.sentiment || 'neutral',
         news_count: news.length,
-        summary: gptAnalysis.summary || 'GPT-5分析結果を取得できませんでした',
+        summary: gptAnalysis.summary || 'GPT-4o分析結果を取得できませんでした',
         confidence: 90,
         gpt_insight: JSON.stringify({
           positive_factors: gptAnalysis.positive_factors || [],
@@ -150,8 +130,8 @@ JSON形式で回答してください：
       }
       
     } catch (error) {
-      console.error('GPT-5分析エラー:', error)
-      // GPT-5が失敗した場合はキーワードベースにフォールバック
+      console.error('GPT-4o分析エラー:', error)
+      // GPT-4oが失敗した場合はキーワードベースにフォールバック
     }
   }
   
@@ -166,6 +146,6 @@ JSON形式で回答してください：
     news_count: news.length,
     summary: `ポジティブ: ${positiveCount}件、ネガティブ: ${negativeCount}件のキーワードを検出`,
     confidence: 60,
-    gpt_insight: 'GPT-5 APIキーが提供されていないため、キーワードベース分析のみ実行'
+    gpt_insight: 'GPT-4o APIキーが提供されていないため、キーワードベース分析のみ実行'
   }
 }
