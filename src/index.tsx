@@ -1299,6 +1299,132 @@ app.get('/', (c) => {
                   </div>
                 </div>
               </div>
+              
+              <!-- 精度評価と動作検証 -->
+              <div class="mt-6 bg-gradient-to-r from-purple-50 to-pink-50 p-6 rounded-lg border-2 border-purple-200">
+                <h6 class="font-bold text-lg text-gray-800 mb-4 text-center">
+                  <i class="fas fa-flask mr-2"></i>予測精度と動作検証
+                </h6>
+                
+                <div class="grid grid-cols-2 gap-6">
+                  <!-- 統計予測の精度 -->
+                  <div class="bg-white p-4 rounded-lg shadow">
+                    <h6 class="font-bold text-sm text-blue-700 mb-3">
+                      <i class="fas fa-chart-line mr-1"></i>統計予測の精度
+                    </h6>
+                    \${data.prediction.backfit ? \`
+                    <div class="space-y-2 text-sm">
+                      <div class="flex justify-between items-center">
+                        <span class="text-gray-600">RMSE:</span>
+                        <span class="font-bold text-blue-600">\${data.prediction.backfit.accuracy.rmse.toFixed(2)}</span>
+                      </div>
+                      <div class="flex justify-between items-center">
+                        <span class="text-gray-600">MAE:</span>
+                        <span class="font-bold text-blue-600">\${data.prediction.backfit.accuracy.mae.toFixed(2)}</span>
+                      </div>
+                      <div class="flex justify-between items-center">
+                        <span class="text-gray-600">方向性正解率:</span>
+                        <span class="font-bold text-blue-600">\${data.prediction.backfit.accuracy.directionAccuracy.toFixed(1)}%</span>
+                      </div>
+                      <div class="pt-2 border-t mt-2">
+                        <p class="text-xs text-gray-500">
+                          <i class="fas fa-info-circle mr-1"></i>
+                          過去30日間のバックテスト結果
+                        </p>
+                      </div>
+                    </div>
+                    \` : '<p class="text-xs text-gray-500">精度データなし</p>'}
+                  </div>
+                  
+                  <!-- ML予測の動作状態 -->
+                  <div class="bg-white p-4 rounded-lg shadow">
+                    <h6 class="font-bold text-sm text-green-700 mb-3">
+                      <i class="fas fa-robot mr-1"></i>ML予測の動作状態
+                    </h6>
+                    <div class="space-y-2 text-sm">
+                      <div class="flex justify-between items-center">
+                        <span class="text-gray-600">API状態:</span>
+                        <span class="font-bold text-green-600">
+                          <i class="fas fa-check-circle mr-1"></i>正常稼働中
+                        </span>
+                      </div>
+                      <div class="flex justify-between items-center">
+                        <span class="text-gray-600">モデル:</span>
+                        <span class="font-bold text-green-600">\${data.prediction.ml_prediction.model}</span>
+                      </div>
+                      <div class="flex justify-between items-center">
+                        <span class="text-gray-600">予測時刻:</span>
+                        <span class="font-bold text-green-600 text-xs">
+                          \${new Date(data.prediction.ml_prediction.timestamp).toLocaleString('ja-JP')}
+                        </span>
+                      </div>
+                      <div class="pt-2 border-t mt-2">
+                        <p class="text-xs text-gray-500">
+                          <i class="fas fa-server mr-1"></i>
+                          Google Cloud Run経由でLightGBMモデル実行
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- 一致度分析 -->
+                <div class="mt-4 bg-white p-4 rounded-lg shadow">
+                  <h6 class="font-bold text-sm text-purple-700 mb-3">
+                    <i class="fas fa-sync-alt mr-1"></i>予測一致度分析
+                  </h6>
+                  <div class="space-y-3">
+                    <div>
+                      <div class="flex justify-between items-center mb-1">
+                        <span class="text-xs text-gray-600">現在価格</span>
+                        <span class="text-sm font-bold text-gray-800">$\${data.current_price.toFixed(2)}</span>
+                      </div>
+                      <div class="flex justify-between items-center mb-1">
+                        <span class="text-xs text-gray-600">統計予測（傾向）</span>
+                        <span class="text-sm font-bold \${data.prediction.action === 'BUY' ? 'text-green-600' : data.prediction.action === 'SELL' ? 'text-red-600' : 'text-gray-600'}">
+                          \${data.prediction.action} (\${data.prediction.confidence}%)
+                        </span>
+                      </div>
+                      <div class="flex justify-between items-center">
+                        <span class="text-xs text-gray-600">ML予測価格</span>
+                        <span class="text-sm font-bold text-green-600">
+                          $\${data.prediction.ml_prediction.predicted_price.toFixed(2)} 
+                          <span class="\${data.prediction.ml_prediction.change_percent > 0 ? 'text-green-600' : 'text-red-600'}">
+                            (\${data.prediction.ml_prediction.change_percent > 0 ? '+' : ''}\${data.prediction.ml_prediction.change_percent.toFixed(2)}%)
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div class="pt-3 border-t">
+                      \${(() => {
+                        const mlDirection = data.prediction.ml_prediction.change_percent > 0 ? 'BUY' : data.prediction.ml_prediction.change_percent < 0 ? 'SELL' : 'HOLD';
+                        const isMatch = (data.prediction.action === mlDirection) || 
+                                       (data.prediction.action === 'HOLD' && Math.abs(data.prediction.ml_prediction.change_percent) < 1) ||
+                                       (mlDirection === 'HOLD' && data.prediction.action === 'HOLD');
+                        return \`
+                          <div class="flex items-center justify-between">
+                            <span class="text-sm font-bold text-gray-700">予測一致度:</span>
+                            <div class="flex items-center">
+                              <span class="px-3 py-1 rounded-full text-xs font-bold \${isMatch ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}">
+                                <i class="fas fa-\${isMatch ? 'check' : 'exclamation-triangle'} mr-1"></i>
+                                \${isMatch ? '一致' : '不一致'}
+                              </span>
+                              <i class="fas fa-info-circle ml-2 text-gray-400 cursor-pointer" 
+                                 title="両予測が同じ方向（上昇/下降）を示している場合は一致と判定"></i>
+                            </div>
+                          </div>
+                          <p class="text-xs text-gray-600 mt-2">
+                            \${isMatch 
+                              ? '✓ 統計予測とML予測が同じ方向性を示しています。信頼度が高い予測です。' 
+                              : '⚠️ 統計予測とML予測で方向性が異なります。慎重な判断を推奨します。'}
+                          </p>
+                        \`;
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
             \` : ''}
 
