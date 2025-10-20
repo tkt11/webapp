@@ -328,7 +328,7 @@ app.get('/', (c) => {
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>Stock AI Predictor - 株価予測AI v10.1 [${Date.now()}]</title>
+  <title>Stock AI Predictor - 株価予測AI v10.2 DEBUG</title>
   <script>
     // Force cache clear
     console.log('%c Application Version: 10.1', 'color: #10b981; font-weight: bold; font-size: 16px;');
@@ -1920,11 +1920,11 @@ app.get('/', (c) => {
                     <div class="flex justify-center gap-6">
                       <div class="bg-blue-50 p-3 rounded">
                         <p class="text-xs text-gray-600 mb-1">Train</p>
-                        <p class="text-xl font-bold text-blue-600">$\${data.prediction.ml_training.performance_metrics.train_rmse.toFixed(2)}</p>
+                        <p class="text-xl font-bold text-blue-600">\${data.prediction.ml_training.performance_metrics.train_rmse.toFixed(2)}</p>
                       </div>
                       <div class="bg-green-50 p-3 rounded">
                         <p class="text-xs text-gray-600 mb-1">Test</p>
-                        <p class="text-xl font-bold text-green-600">$\${data.prediction.ml_training.performance_metrics.test_rmse.toFixed(2)}</p>
+                        <p class="text-xl font-bold text-green-600">\${data.prediction.ml_training.performance_metrics.test_rmse.toFixed(2)}</p>
                       </div>
                     </div>
                   </div>
@@ -1935,11 +1935,11 @@ app.get('/', (c) => {
                     <div class="flex justify-center gap-6">
                       <div class="bg-blue-50 p-3 rounded">
                         <p class="text-xs text-gray-600 mb-1">Train</p>
-                        <p class="text-xl font-bold text-blue-600">$\${data.prediction.ml_training.performance_metrics.train_mae.toFixed(2)}</p>
+                        <p class="text-xl font-bold text-blue-600">\${data.prediction.ml_training.performance_metrics.train_mae.toFixed(2)}</p>
                       </div>
                       <div class="bg-green-50 p-3 rounded">
                         <p class="text-xs text-gray-600 mb-1">Test</p>
-                        <p class="text-xl font-bold text-green-600">$\${data.prediction.ml_training.performance_metrics.test_mae.toFixed(2)}</p>
+                        <p class="text-xl font-bold text-green-600">\${data.prediction.ml_training.performance_metrics.test_mae.toFixed(2)}</p>
                       </div>
                     </div>
                   </div>
@@ -1966,7 +1966,7 @@ app.get('/', (c) => {
                     <i class="fas fa-exchange-alt mr-1"></i>汎化ギャップ（Test RMSE - Train RMSE）
                   </p>
                   <p class="text-3xl font-bold text-\${Math.abs(data.prediction.ml_training.performance_metrics.generalization_gap) < 2 ? 'green' : Math.abs(data.prediction.ml_training.performance_metrics.generalization_gap) < 5 ? 'yellow' : 'red'}-600">
-                    $\${data.prediction.ml_training.performance_metrics.generalization_gap.toFixed(2)}
+                    \${data.prediction.ml_training.performance_metrics.generalization_gap.toFixed(2)}
                   </p>
                   <p class="text-xs text-gray-600 mt-2">
                     \${Math.abs(data.prediction.ml_training.performance_metrics.generalization_gap) < 2 
@@ -2484,7 +2484,15 @@ app.get('/', (c) => {
         
         // 学習曲線チャート（学習が実行された場合のみ）
         if (data.prediction.ml_training) {
-          const learningCurveCtx = document.getElementById('learningCurveChart').getContext('2d')
+          console.log('✅ ml_training exists, rendering learning curves...')
+          const learningCurveElement = document.getElementById('learningCurveChart')
+          if (!learningCurveElement) {
+            console.error('❌ ERROR: learningCurveChart element not found in DOM!')
+            console.log('Available elements:', document.querySelectorAll('canvas').length, 'canvas elements')
+          } else {
+            console.log('✅ learningCurveChart element found')
+          }
+          const learningCurveCtx = learningCurveElement.getContext('2d')
           const trainingData = data.prediction.ml_training
           
           new Chart(learningCurveCtx, {
@@ -2605,7 +2613,16 @@ app.get('/', (c) => {
           
           if (trainingData.future_predictions) {
             console.log('✅ Rendering ML future price chart')
-            const mlFuturePriceCtx = document.getElementById('mlFuturePriceChart').getContext('2d')
+            const mlFuturePriceElement = document.getElementById('mlFuturePriceChart')
+            if (!mlFuturePriceElement) {
+              console.error('❌ ERROR: mlFuturePriceChart element not found in DOM!')
+              console.log('Searching for element...')
+              const allCanvases = document.querySelectorAll('canvas')
+              console.log('Found', allCanvases.length, 'canvas elements:', Array.from(allCanvases).map(c => c.id))
+            } else {
+              console.log('✅ mlFuturePriceChart element found')
+            }
+            const mlFuturePriceCtx = mlFuturePriceElement.getContext('2d')
             const futurePred = trainingData.future_predictions
             
             // 過去30日のデータ（予測の backfit から）
@@ -2734,7 +2751,13 @@ app.get('/', (c) => {
         
         if (data.prediction.ml_prediction) {
           console.log('✅ Rendering prediction comparison chart')
-          const comparisonCtx = document.getElementById('predictionComparisonChart').getContext('2d')
+          const comparisonElement = document.getElementById('predictionComparisonChart')
+          if (!comparisonElement) {
+            console.error('❌ ERROR: predictionComparisonChart element not found in DOM!')
+          } else {
+            console.log('✅ predictionComparisonChart element found')
+          }
+          const comparisonCtx = comparisonElement.getContext('2d')
           
           // 統計予測の方向性（BUY=上昇、SELL=下降、HOLD=横ばい）
           const statDirection = data.prediction.action
