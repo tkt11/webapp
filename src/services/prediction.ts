@@ -626,7 +626,7 @@ ${prediction.risks.join('\n')}
 500文字程度で、専門用語は避けて平易に説明してください。
 `
     
-    // GPT-5 Responses APIを試行、失敗時はgpt-4o-miniにフォールバック
+    // GPT-5 Responses APIを試行、失敗時はgpt-4oにフォールバック
     let response;
     try {
       response = await openai.responses.create({
@@ -634,10 +634,10 @@ ${prediction.risks.join('\n')}
         input: prompt
       })
     } catch (gpt5Error: any) {
-      console.warn('GPT-5 API failed, falling back to gpt-4o-mini:', gpt5Error?.message);
-      // フォールバック: gpt-4o-mini (安定版)
+      console.warn('GPT-5 API failed, falling back to gpt-4o:', gpt5Error?.message);
+      // フォールバック: gpt-4o (高性能版)
       const chatResponse = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
+        model: 'gpt-4o',
         messages: [
           {
             role: 'system',
