@@ -104,6 +104,76 @@ export interface GPT5FinalJudgment {
   }
   recommendation: string
   data_sources_used: string[]
+  
+  // 新機能: GPT-5独自の価格予測
+  price_predictions: {
+    short_term: {
+      day_3: { price: number; confidence: number }
+      day_7: { price: number; confidence: number }
+      day_14: { price: number; confidence: number }
+    }
+    mid_term: {
+      day_30: { price: number; confidence: number }
+      day_60: { price: number; confidence: number }
+      day_90: { price: number; confidence: number }
+    }
+  }
+  
+  // 新機能: 最適な売買タイミング
+  optimal_timing: {
+    entry: {
+      recommended_date: string
+      price_range: { min: number; max: number }
+      reasoning: string
+    }
+    exit: {
+      recommended_date: string
+      price_range: { min: number; max: number }
+      reasoning: string
+    }
+    stop_loss: {
+      price: number
+      percentage: number
+      reasoning: string
+    }
+  }
+  
+  // 新機能: ポートフォリオ配分提案
+  portfolio_allocation: {
+    conservative: { percentage: number; reasoning: string }
+    moderate: { percentage: number; reasoning: string }
+    aggressive: { percentage: number; reasoning: string }
+  }
+  
+  // 新機能: シナリオ分析
+  scenario_analysis: {
+    best_case: {
+      probability: number
+      price_target: number
+      timeframe: string
+      conditions: string[]
+    }
+    base_case: {
+      probability: number
+      price_target: number
+      timeframe: string
+      conditions: string[]
+    }
+    worst_case: {
+      probability: number
+      price_target: number
+      timeframe: string
+      conditions: string[]
+    }
+  }
+  
+  // 新機能: 今後の重要イベント
+  upcoming_events: Array<{
+    date: string
+    event: string
+    expected_impact: 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL'
+    description: string
+  }>
 }
 
 export interface StockData {

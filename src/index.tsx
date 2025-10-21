@@ -2686,6 +2686,194 @@ app.get('/', (c) => {
                 <p class="text-sm leading-relaxed">\${data.prediction.gpt5_final_judgment.recommendation}</p>
               </div>
 
+              \${data.prediction.gpt5_final_judgment.price_predictions ? \`
+              <!-- GPT-5独自の価格予測 -->
+              <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
+                <h5 class="font-bold mb-3"><i class="fas fa-chart-line mr-2"></i>GPT-5独自の価格予測</h5>
+                <div class="grid grid-cols-2 gap-4">
+                  <div>
+                    <p class="text-xs font-bold mb-2">短期予測（3-14日）</p>
+                    <div class="space-y-2">
+                      <div class="bg-white bg-opacity-10 p-2 rounded">
+                        <div class="flex justify-between text-xs">
+                          <span>3日後:</span>
+                          <span class="font-bold">$\${data.prediction.gpt5_final_judgment.price_predictions.short_term.day_3.price.toFixed(2)}</span>
+                        </div>
+                        <div class="text-xs opacity-75">信頼度: \${data.prediction.gpt5_final_judgment.price_predictions.short_term.day_3.confidence}%</div>
+                      </div>
+                      <div class="bg-white bg-opacity-10 p-2 rounded">
+                        <div class="flex justify-between text-xs">
+                          <span>7日後:</span>
+                          <span class="font-bold">$\${data.prediction.gpt5_final_judgment.price_predictions.short_term.day_7.price.toFixed(2)}</span>
+                        </div>
+                        <div class="text-xs opacity-75">信頼度: \${data.prediction.gpt5_final_judgment.price_predictions.short_term.day_7.confidence}%</div>
+                      </div>
+                      <div class="bg-white bg-opacity-10 p-2 rounded">
+                        <div class="flex justify-between text-xs">
+                          <span>14日後:</span>
+                          <span class="font-bold">$\${data.prediction.gpt5_final_judgment.price_predictions.short_term.day_14.price.toFixed(2)}</span>
+                        </div>
+                        <div class="text-xs opacity-75">信頼度: \${data.prediction.gpt5_final_judgment.price_predictions.short_term.day_14.confidence}%</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <p class="text-xs font-bold mb-2">中期予測（30-90日）</p>
+                    <div class="space-y-2">
+                      <div class="bg-white bg-opacity-10 p-2 rounded">
+                        <div class="flex justify-between text-xs">
+                          <span>30日後:</span>
+                          <span class="font-bold">$\${data.prediction.gpt5_final_judgment.price_predictions.mid_term.day_30.price.toFixed(2)}</span>
+                        </div>
+                        <div class="text-xs opacity-75">信頼度: \${data.prediction.gpt5_final_judgment.price_predictions.mid_term.day_30.confidence}%</div>
+                      </div>
+                      <div class="bg-white bg-opacity-10 p-2 rounded">
+                        <div class="flex justify-between text-xs">
+                          <span>60日後:</span>
+                          <span class="font-bold">$\${data.prediction.gpt5_final_judgment.price_predictions.mid_term.day_60.price.toFixed(2)}</span>
+                        </div>
+                        <div class="text-xs opacity-75">信頼度: \${data.prediction.gpt5_final_judgment.price_predictions.mid_term.day_60.confidence}%</div>
+                      </div>
+                      <div class="bg-white bg-opacity-10 p-2 rounded">
+                        <div class="flex justify-between text-xs">
+                          <span>90日後:</span>
+                          <span class="font-bold">$\${data.prediction.gpt5_final_judgment.price_predictions.mid_term.day_90.price.toFixed(2)}</span>
+                        </div>
+                        <div class="text-xs opacity-75">信頼度: \${data.prediction.gpt5_final_judgment.price_predictions.mid_term.day_90.confidence}%</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              \` : ''}
+
+              \${data.prediction.gpt5_final_judgment.optimal_timing ? \`
+              <!-- 最適な売買タイミング -->
+              <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
+                <h5 class="font-bold mb-3"><i class="fas fa-calendar-alt mr-2"></i>最適な売買タイミング</h5>
+                <div class="grid grid-cols-3 gap-4 mb-3">
+                  <div class="bg-green-500 bg-opacity-30 p-3 rounded-lg">
+                    <p class="text-xs font-bold mb-1"><i class="fas fa-arrow-down mr-1"></i>エントリー（購入）</p>
+                    <p class="text-sm font-bold mb-1">\${data.prediction.gpt5_final_judgment.optimal_timing.entry.recommended_date}</p>
+                    <p class="text-xs">価格帯: $\${data.prediction.gpt5_final_judgment.optimal_timing.entry.price_range.min.toFixed(2)} - $\${data.prediction.gpt5_final_judgment.optimal_timing.entry.price_range.max.toFixed(2)}</p>
+                    <p class="text-xs mt-2 opacity-90">\${data.prediction.gpt5_final_judgment.optimal_timing.entry.reasoning}</p>
+                  </div>
+                  <div class="bg-red-500 bg-opacity-30 p-3 rounded-lg">
+                    <p class="text-xs font-bold mb-1"><i class="fas fa-arrow-up mr-1"></i>エグジット（売却）</p>
+                    <p class="text-sm font-bold mb-1">\${data.prediction.gpt5_final_judgment.optimal_timing.exit.recommended_date}</p>
+                    <p class="text-xs">価格帯: $\${data.prediction.gpt5_final_judgment.optimal_timing.exit.price_range.min.toFixed(2)} - $\${data.prediction.gpt5_final_judgment.optimal_timing.exit.price_range.max.toFixed(2)}</p>
+                    <p class="text-xs mt-2 opacity-90">\${data.prediction.gpt5_final_judgment.optimal_timing.exit.reasoning}</p>
+                  </div>
+                  <div class="bg-orange-500 bg-opacity-30 p-3 rounded-lg">
+                    <p class="text-xs font-bold mb-1"><i class="fas fa-hand-paper mr-1"></i>ストップロス</p>
+                    <p class="text-sm font-bold mb-1">$\${data.prediction.gpt5_final_judgment.optimal_timing.stop_loss.price.toFixed(2)}</p>
+                    <p class="text-xs">(\${data.prediction.gpt5_final_judgment.optimal_timing.stop_loss.percentage.toFixed(1)}%)</p>
+                    <p class="text-xs mt-2 opacity-90">\${data.prediction.gpt5_final_judgment.optimal_timing.stop_loss.reasoning}</p>
+                  </div>
+                </div>
+              </div>
+              \` : ''}
+
+              \${data.prediction.gpt5_final_judgment.portfolio_allocation ? \`
+              <!-- ポートフォリオ配分提案 -->
+              <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
+                <h5 class="font-bold mb-3"><i class="fas fa-pie-chart mr-2"></i>ポートフォリオ配分提案</h5>
+                <div class="grid grid-cols-3 gap-4">
+                  <div class="bg-white bg-opacity-10 p-3 rounded text-center">
+                    <p class="text-xs mb-1">保守的投資家</p>
+                    <p class="text-3xl font-bold mb-1">\${data.prediction.gpt5_final_judgment.portfolio_allocation.conservative.percentage}%</p>
+                    <p class="text-xs opacity-90">\${data.prediction.gpt5_final_judgment.portfolio_allocation.conservative.reasoning}</p>
+                  </div>
+                  <div class="bg-white bg-opacity-10 p-3 rounded text-center">
+                    <p class="text-xs mb-1">中庸投資家</p>
+                    <p class="text-3xl font-bold mb-1">\${data.prediction.gpt5_final_judgment.portfolio_allocation.moderate.percentage}%</p>
+                    <p class="text-xs opacity-90">\${data.prediction.gpt5_final_judgment.portfolio_allocation.moderate.reasoning}</p>
+                  </div>
+                  <div class="bg-white bg-opacity-10 p-3 rounded text-center">
+                    <p class="text-xs mb-1">積極的投資家</p>
+                    <p class="text-3xl font-bold mb-1">\${data.prediction.gpt5_final_judgment.portfolio_allocation.aggressive.percentage}%</p>
+                    <p class="text-xs opacity-90">\${data.prediction.gpt5_final_judgment.portfolio_allocation.aggressive.reasoning}</p>
+                  </div>
+                </div>
+              </div>
+              \` : ''}
+
+              \${data.prediction.gpt5_final_judgment.scenario_analysis ? \`
+              <!-- シナリオ分析 -->
+              <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
+                <h5 class="font-bold mb-3"><i class="fas fa-project-diagram mr-2"></i>シナリオ分析</h5>
+                <div class="grid grid-cols-3 gap-4">
+                  <div class="bg-green-500 bg-opacity-20 p-3 rounded">
+                    <div class="flex items-center justify-between mb-2">
+                      <p class="text-xs font-bold">🎯 ベストケース</p>
+                      <span class="text-xs bg-white bg-opacity-20 px-2 py-1 rounded">\${data.prediction.gpt5_final_judgment.scenario_analysis.best_case.probability}%</span>
+                    </div>
+                    <p class="text-2xl font-bold mb-1">$\${data.prediction.gpt5_final_judgment.scenario_analysis.best_case.price_target.toFixed(2)}</p>
+                    <p class="text-xs mb-2 opacity-90">期間: \${data.prediction.gpt5_final_judgment.scenario_analysis.best_case.timeframe}</p>
+                    <p class="text-xs font-bold mb-1">前提条件:</p>
+                    <ul class="text-xs space-y-1">
+                      \${data.prediction.gpt5_final_judgment.scenario_analysis.best_case.conditions.map(c => \`<li>• \${c}</li>\`).join('')}
+                    </ul>
+                  </div>
+                  <div class="bg-blue-500 bg-opacity-20 p-3 rounded">
+                    <div class="flex items-center justify-between mb-2">
+                      <p class="text-xs font-bold">📊 ベースケース</p>
+                      <span class="text-xs bg-white bg-opacity-20 px-2 py-1 rounded">\${data.prediction.gpt5_final_judgment.scenario_analysis.base_case.probability}%</span>
+                    </div>
+                    <p class="text-2xl font-bold mb-1">$\${data.prediction.gpt5_final_judgment.scenario_analysis.base_case.price_target.toFixed(2)}</p>
+                    <p class="text-xs mb-2 opacity-90">期間: \${data.prediction.gpt5_final_judgment.scenario_analysis.base_case.timeframe}</p>
+                    <p class="text-xs font-bold mb-1">前提条件:</p>
+                    <ul class="text-xs space-y-1">
+                      \${data.prediction.gpt5_final_judgment.scenario_analysis.base_case.conditions.map(c => \`<li>• \${c}</li>\`).join('')}
+                    </ul>
+                  </div>
+                  <div class="bg-red-500 bg-opacity-20 p-3 rounded">
+                    <div class="flex items-center justify-between mb-2">
+                      <p class="text-xs font-bold">⚠️ ワーストケース</p>
+                      <span class="text-xs bg-white bg-opacity-20 px-2 py-1 rounded">\${data.prediction.gpt5_final_judgment.scenario_analysis.worst_case.probability}%</span>
+                    </div>
+                    <p class="text-2xl font-bold mb-1">$\${data.prediction.gpt5_final_judgment.scenario_analysis.worst_case.price_target.toFixed(2)}</p>
+                    <p class="text-xs mb-2 opacity-90">期間: \${data.prediction.gpt5_final_judgment.scenario_analysis.worst_case.timeframe}</p>
+                    <p class="text-xs font-bold mb-1">前提条件:</p>
+                    <ul class="text-xs space-y-1">
+                      \${data.prediction.gpt5_final_judgment.scenario_analysis.worst_case.conditions.map(c => \`<li>• \${c}</li>\`).join('')}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+              \` : ''}
+
+              \${data.prediction.gpt5_final_judgment.upcoming_events && data.prediction.gpt5_final_judgment.upcoming_events.length > 0 ? \`
+              <!-- 今後の重要イベント -->
+              <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
+                <h5 class="font-bold mb-3"><i class="fas fa-calendar-check mr-2"></i>今後の重要イベント</h5>
+                <div class="space-y-2">
+                  \${data.prediction.gpt5_final_judgment.upcoming_events.map(event => \`
+                    <div class="bg-white bg-opacity-10 p-3 rounded flex items-start">
+                      <div class="flex-shrink-0 mr-3">
+                        <div class="text-xs bg-white bg-opacity-20 px-2 py-1 rounded">\${event.date}</div>
+                      </div>
+                      <div class="flex-grow">
+                        <div class="flex items-center mb-1">
+                          <span class="text-sm font-bold mr-2">\${event.event}</span>
+                          <span class="text-xs px-2 py-1 rounded \${
+                            event.expected_impact === 'POSITIVE' ? 'bg-green-500' :
+                            event.expected_impact === 'NEGATIVE' ? 'bg-red-500' :
+                            'bg-gray-500'
+                          }">
+                            \${event.expected_impact === 'POSITIVE' ? '↑ ポジティブ' :
+                              event.expected_impact === 'NEGATIVE' ? '↓ ネガティブ' :
+                              '→ 中立'}
+                          </span>
+                        </div>
+                        <p class="text-xs opacity-90">\${event.description}</p>
+                      </div>
+                    </div>
+                  \`).join('')}
+                </div>
+              </div>
+              \` : ''}
+
               <!-- 使用データソース -->
               <div class="bg-white bg-opacity-10 p-3 rounded-lg">
                 <p class="text-xs opacity-75 mb-2">

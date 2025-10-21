@@ -695,8 +695,90 @@ ${prediction.risks.map(r => '- ' + r).join('\n')}
     "description": "リスクレベルの詳細説明"
   },
   "recommendation": "投資家への具体的な推奨事項（200文字程度）",
-  "data_sources_used": ["判断に使用した主要データソース5つ（例: テクニカル分析, ML予測精度, センチメント等）"]
+  "data_sources_used": ["判断に使用した主要データソース5つ"],
+  
+  "price_predictions": {
+    "short_term": {
+      "day_3": { "price": 数値, "confidence": 0-100 },
+      "day_7": { "price": 数値, "confidence": 0-100 },
+      "day_14": { "price": 数値, "confidence": 0-100 }
+    },
+    "mid_term": {
+      "day_30": { "price": 数値, "confidence": 0-100 },
+      "day_60": { "price": 数値, "confidence": 0-100 },
+      "day_90": { "price": 数値, "confidence": 0-100 }
+    }
+  },
+  
+  "optimal_timing": {
+    "entry": {
+      "recommended_date": "YYYY-MM-DD形式（今日から30日以内）",
+      "price_range": { "min": 数値, "max": 数値 },
+      "reasoning": "なぜこの時期・価格帯が最適か（100文字程度）"
+    },
+    "exit": {
+      "recommended_date": "YYYY-MM-DD形式（購入後30-90日程度）",
+      "price_range": { "min": 数値, "max": 数値 },
+      "reasoning": "なぜこの時期・価格帯で売却すべきか（100文字程度）"
+    },
+    "stop_loss": {
+      "price": 数値,
+      "percentage": -5〜-15の数値,
+      "reasoning": "このストップロス設定の理由（100文字程度）"
+    }
+  },
+  
+  "portfolio_allocation": {
+    "conservative": { 
+      "percentage": 0-100の数値,
+      "reasoning": "保守的投資家向けの配分理由"
+    },
+    "moderate": { 
+      "percentage": 0-100の数値,
+      "reasoning": "中庸投資家向けの配分理由"
+    },
+    "aggressive": { 
+      "percentage": 0-100の数値,
+      "reasoning": "積極的投資家向けの配分理由"
+    }
+  },
+  
+  "scenario_analysis": {
+    "best_case": {
+      "probability": 0-100の数値,
+      "price_target": 数値,
+      "timeframe": "3ヶ月/6ヶ月/1年",
+      "conditions": ["条件1", "条件2", "条件3"]
+    },
+    "base_case": {
+      "probability": 0-100の数値,
+      "price_target": 数値,
+      "timeframe": "3ヶ月/6ヶ月/1年",
+      "conditions": ["条件1", "条件2", "条件3"]
+    },
+    "worst_case": {
+      "probability": 0-100の数値,
+      "price_target": 数値,
+      "timeframe": "3ヶ月/6ヶ月/1年",
+      "conditions": ["条件1", "条件2", "条件3"]
+    }
+  },
+  
+  "upcoming_events": [
+    {
+      "date": "YYYY-MM-DD形式",
+      "event": "イベント名（例: Q4決算発表、製品発表会等）",
+      "expected_impact": "POSITIVE/NEGATIVE/NEUTRAL",
+      "description": "イベントの株価への影響説明（80文字程度）"
+    }
+  ]
 }
+
+【重要な注意事項】
+1. price_predictionsは現在価格$${currentPrice.toFixed(2)}を基準に、合理的な範囲で予測してください
+2. optimal_timingの日付は今日（2025-10-21）を起点に計算してください
+3. scenario_analysisの確率は合計100%になるようにしてください
+4. upcoming_eventsは${symbol}の実際の決算日やイベントを推測して含めてください
 `
     
     // GPT-5 Responses APIを使用
