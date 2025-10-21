@@ -174,6 +174,36 @@ export interface GPT5FinalJudgment {
     expected_impact: 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL'
     description: string
   }>
+  
+  // GPT-5 Code Interpreterによる高度な統計計算結果（オプショナル）
+  statistical_metrics?: {
+    annual_volatility: number       // 年率ボラティリティ (%)
+    sharpe_ratio: number            // シャープレシオ
+    max_drawdown: number            // 最大ドローダウン (%)
+    value_at_risk: number           // VaR (95%信頼区間での損失額)
+  }
+  
+  // モンテカルロシミュレーション結果（オプショナル）
+  monte_carlo_results?: {
+    day_3_median?: number
+    day_3_upper?: number
+    day_3_lower?: number
+    day_7_median?: number
+    day_7_upper?: number
+    day_7_lower?: number
+    day_14_median?: number
+    day_14_upper?: number
+    day_14_lower?: number
+    day_30_median?: number
+    day_30_upper?: number
+    day_30_lower?: number
+    day_60_median?: number
+    day_60_upper?: number
+    day_60_lower?: number
+    day_90_median: number
+    day_90_upper: number
+    day_90_lower: number
+  }
 }
 
 export interface StockData {

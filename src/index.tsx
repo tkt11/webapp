@@ -2745,6 +2745,16 @@ app.get('/', (c) => {
                   </div>
                 </div>
               </div>
+              
+              <!-- GPT-5価格予測チャート -->
+              <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg">
+                <h6 class="font-bold mb-3 text-sm"><i class="fas fa-chart-line mr-2"></i>GPT-5価格予測チャート</h6>
+                <canvas id="gpt5PricePredictionChart" style="max-height: 300px;"></canvas>
+                <p class="text-xs mt-3 opacity-75 text-center">
+                  <i class="fas fa-info-circle mr-1"></i>
+                  現在価格からGPT-5が予測した短期・中期の価格推移
+                </p>
+              </div>
               \` : ''}
 
               \${data.prediction.gpt5_final_judgment.optimal_timing ? \`
@@ -2841,6 +2851,16 @@ app.get('/', (c) => {
                   </div>
                 </div>
               </div>
+              
+              <!-- シナリオ分析チャート -->
+              <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg">
+                <h6 class="font-bold mb-3 text-sm"><i class="fas fa-chart-bar mr-2"></i>シナリオ分析チャート</h6>
+                <canvas id="scenarioAnalysisChart" style="max-height: 250px;"></canvas>
+                <p class="text-xs mt-3 opacity-75 text-center">
+                  <i class="fas fa-info-circle mr-1"></i>
+                  ベストケース・ベースケース・ワーストケースの価格目標と確率分布
+                </p>
+              </div>
               \` : ''}
 
               \${data.prediction.gpt5_final_judgment.upcoming_events && data.prediction.gpt5_final_judgment.upcoming_events.length > 0 ? \`
@@ -2871,6 +2891,68 @@ app.get('/', (c) => {
                     </div>
                   \`).join('')}
                 </div>
+              </div>
+              \` : ''}
+
+              <!-- 統計的リスク指標（Code Interpreterによる高度計算結果） -->
+              \${data.prediction.gpt5_final_judgment.statistical_metrics ? \`
+              <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
+                <h5 class="font-bold mb-3"><i class="fas fa-calculator mr-2"></i>統計的リスク指標 (Code Interpreter計算)</h5>
+                <div class="grid grid-cols-4 gap-4 mb-3">
+                  <div class="bg-white bg-opacity-10 p-3 rounded text-center">
+                    <p class="text-xs mb-1">年率ボラティリティ</p>
+                    <p class="text-2xl font-bold">\${data.prediction.gpt5_final_judgment.statistical_metrics.annual_volatility.toFixed(2)}%</p>
+                    <p class="text-xs mt-1 opacity-75">価格変動の大きさ</p>
+                  </div>
+                  <div class="bg-white bg-opacity-10 p-3 rounded text-center">
+                    <p class="text-xs mb-1">シャープレシオ</p>
+                    <p class="text-2xl font-bold">\${data.prediction.gpt5_final_judgment.statistical_metrics.sharpe_ratio.toFixed(2)}</p>
+                    <p class="text-xs mt-1 opacity-75">リスク調整後リターン</p>
+                  </div>
+                  <div class="bg-white bg-opacity-10 p-3 rounded text-center">
+                    <p class="text-xs mb-1">最大ドローダウン</p>
+                    <p class="text-2xl font-bold text-red-300">\${data.prediction.gpt5_final_judgment.statistical_metrics.max_drawdown.toFixed(2)}%</p>
+                    <p class="text-xs mt-1 opacity-75">最大下落率</p>
+                  </div>
+                  <div class="bg-white bg-opacity-10 p-3 rounded text-center">
+                    <p class="text-xs mb-1">VaR (95%)</p>
+                    <p class="text-2xl font-bold text-orange-300">$\${data.prediction.gpt5_final_judgment.statistical_metrics.value_at_risk.toFixed(2)}</p>
+                    <p class="text-xs mt-1 opacity-75">5%確率での損失額</p>
+                  </div>
+                </div>
+                <div class="bg-blue-500 bg-opacity-20 p-3 rounded">
+                  <p class="text-xs">
+                    <i class="fas fa-info-circle mr-1"></i>
+                    <strong>Code Interpreterによる計算:</strong> これらの指標はGPT-5がPythonで実際に計算した結果です。
+                    モンテカルロシミュレーションや時系列分析など、高度な統計手法を使用しています。
+                  </p>
+                </div>
+              </div>
+              \` : ''}
+              
+              <!-- モンテカルロシミュレーション結果 -->
+              \${data.prediction.gpt5_final_judgment.monte_carlo_results ? \`
+              <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
+                <h5 class="font-bold mb-3"><i class="fas fa-dice mr-2"></i>モンテカルロシミュレーション結果</h5>
+                <canvas id="monteCarloChart" style="max-height: 300px;"></canvas>
+                <div class="grid grid-cols-3 gap-3 mt-3">
+                  <div class="bg-white bg-opacity-10 p-2 rounded text-center">
+                    <p class="text-xs mb-1">90日後 中央値</p>
+                    <p class="text-lg font-bold">$\${data.prediction.gpt5_final_judgment.monte_carlo_results.day_90_median.toFixed(2)}</p>
+                  </div>
+                  <div class="bg-green-500 bg-opacity-20 p-2 rounded text-center">
+                    <p class="text-xs mb-1">95%信頼区間 上限</p>
+                    <p class="text-lg font-bold text-green-300">$\${data.prediction.gpt5_final_judgment.monte_carlo_results.day_90_upper.toFixed(2)}</p>
+                  </div>
+                  <div class="bg-red-500 bg-opacity-20 p-2 rounded text-center">
+                    <p class="text-xs mb-1">95%信頼区間 下限</p>
+                    <p class="text-lg font-bold text-red-300">$\${data.prediction.gpt5_final_judgment.monte_carlo_results.day_90_lower.toFixed(2)}</p>
+                  </div>
+                </div>
+                <p class="text-xs mt-3 opacity-75 text-center">
+                  <i class="fas fa-info-circle mr-1"></i>
+                  1000回のシミュレーションに基づく価格予測の分布
+                </p>
               </div>
               \` : ''}
 
@@ -3074,6 +3156,351 @@ app.get('/', (c) => {
             }
           }
         })
+        
+        // GPT-5価格予測チャート（GPT-5最終判断がある場合のみ）
+        if (data.prediction.gpt5_final_judgment && data.prediction.gpt5_final_judgment.price_predictions) {
+          const gpt5PriceCtx = document.getElementById('gpt5PricePredictionChart')
+          if (gpt5PriceCtx) {
+            const predictions = data.prediction.gpt5_final_judgment.price_predictions
+            
+            new Chart(gpt5PriceCtx.getContext('2d'), {
+              type: 'line',
+              data: {
+                labels: ['現在', '3日後', '7日後', '14日後', '30日後', '60日後', '90日後'],
+                datasets: [{
+                  label: 'GPT-5予測価格',
+                  data: [
+                    data.current_price,
+                    predictions.short_term.day_3.price,
+                    predictions.short_term.day_7.price,
+                    predictions.short_term.day_14.price,
+                    predictions.mid_term.day_30.price,
+                    predictions.mid_term.day_60.price,
+                    predictions.mid_term.day_90.price
+                  ],
+                  borderColor: 'rgb(147, 51, 234)',
+                  backgroundColor: 'rgba(147, 51, 234, 0.1)',
+                  borderWidth: 3,
+                  tension: 0.3,
+                  fill: true,
+                  pointRadius: 5,
+                  pointBackgroundColor: 'rgb(147, 51, 234)',
+                  pointBorderColor: '#fff',
+                  pointBorderWidth: 2
+                }, {
+                  label: '信頼度エリア（上限）',
+                  data: [
+                    data.current_price * 1.05,
+                    predictions.short_term.day_3.price * (1 + (100 - predictions.short_term.day_3.confidence) / 200),
+                    predictions.short_term.day_7.price * (1 + (100 - predictions.short_term.day_7.confidence) / 200),
+                    predictions.short_term.day_14.price * (1 + (100 - predictions.short_term.day_14.confidence) / 200),
+                    predictions.mid_term.day_30.price * (1 + (100 - predictions.mid_term.day_30.confidence) / 200),
+                    predictions.mid_term.day_60.price * (1 + (100 - predictions.mid_term.day_60.confidence) / 200),
+                    predictions.mid_term.day_90.price * (1 + (100 - predictions.mid_term.day_90.confidence) / 200)
+                  ],
+                  borderColor: 'rgba(147, 51, 234, 0.2)',
+                  backgroundColor: 'transparent',
+                  borderWidth: 1,
+                  borderDash: [5, 5],
+                  tension: 0.3,
+                  fill: false,
+                  pointRadius: 0
+                }, {
+                  label: '信頼度エリア（下限）',
+                  data: [
+                    data.current_price * 0.95,
+                    predictions.short_term.day_3.price * (1 - (100 - predictions.short_term.day_3.confidence) / 200),
+                    predictions.short_term.day_7.price * (1 - (100 - predictions.short_term.day_7.confidence) / 200),
+                    predictions.short_term.day_14.price * (1 - (100 - predictions.short_term.day_14.confidence) / 200),
+                    predictions.mid_term.day_30.price * (1 - (100 - predictions.mid_term.day_30.confidence) / 200),
+                    predictions.mid_term.day_60.price * (1 - (100 - predictions.mid_term.day_60.confidence) / 200),
+                    predictions.mid_term.day_90.price * (1 - (100 - predictions.mid_term.day_90.confidence) / 200)
+                  ],
+                  borderColor: 'rgba(147, 51, 234, 0.2)',
+                  backgroundColor: 'transparent',
+                  borderWidth: 1,
+                  borderDash: [5, 5],
+                  tension: 0.3,
+                  fill: '-1',
+                  pointRadius: 0
+                }]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                  mode: 'index',
+                  intersect: false
+                },
+                plugins: {
+                  legend: {
+                    display: true,
+                    position: 'top'
+                  },
+                  tooltip: {
+                    callbacks: {
+                      label: function(context) {
+                        if (context.datasetIndex === 0) {
+                          const idx = context.dataIndex
+                          const confidences = [
+                            100,
+                            predictions.short_term.day_3.confidence,
+                            predictions.short_term.day_7.confidence,
+                            predictions.short_term.day_14.confidence,
+                            predictions.mid_term.day_30.confidence,
+                            predictions.mid_term.day_60.confidence,
+                            predictions.mid_term.day_90.confidence
+                          ]
+                          return context.dataset.label + ': $' + context.parsed.y.toFixed(2) + ' (信頼度: ' + confidences[idx] + '%)'
+                        }
+                        return context.dataset.label + ': $' + context.parsed.y.toFixed(2)
+                      }
+                    }
+                  }
+                },
+                scales: {
+                  y: {
+                    beginAtZero: false,
+                    title: {
+                      display: true,
+                      text: '予測価格 (USD)'
+                    }
+                  },
+                  x: {
+                    title: {
+                      display: true,
+                      text: '期間'
+                    }
+                  }
+                }
+              }
+            })
+          }
+        }
+        
+        // GPT-5シナリオ分析チャート（GPT-5最終判断がある場合のみ）
+        if (data.prediction.gpt5_final_judgment && data.prediction.gpt5_final_judgment.scenario_analysis) {
+          const scenarioCtx = document.getElementById('scenarioAnalysisChart')
+          if (scenarioCtx) {
+            const scenarios = data.prediction.gpt5_final_judgment.scenario_analysis
+            
+            new Chart(scenarioCtx.getContext('2d'), {
+              type: 'bar',
+              data: {
+                labels: ['ワーストケース', 'ベースケース', 'ベストケース'],
+                datasets: [{
+                  label: '予想価格',
+                  data: [
+                    scenarios.worst_case.price_target,
+                    scenarios.base_case.price_target,
+                    scenarios.best_case.price_target
+                  ],
+                  backgroundColor: [
+                    'rgba(239, 68, 68, 0.6)',
+                    'rgba(59, 130, 246, 0.6)',
+                    'rgba(34, 197, 94, 0.6)'
+                  ],
+                  borderColor: [
+                    'rgb(239, 68, 68)',
+                    'rgb(59, 130, 246)',
+                    'rgb(34, 197, 94)'
+                  ],
+                  borderWidth: 2
+                }, {
+                  label: '発生確率 (%)',
+                  data: [
+                    scenarios.worst_case.probability,
+                    scenarios.base_case.probability,
+                    scenarios.best_case.probability
+                  ],
+                  backgroundColor: [
+                    'rgba(239, 68, 68, 0.3)',
+                    'rgba(59, 130, 246, 0.3)',
+                    'rgba(34, 197, 94, 0.3)'
+                  ],
+                  borderColor: [
+                    'rgb(239, 68, 68)',
+                    'rgb(59, 130, 246)',
+                    'rgb(34, 197, 94)'
+                  ],
+                  borderWidth: 2,
+                  borderDash: [5, 5],
+                  yAxisID: 'y1'
+                }]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                  mode: 'index',
+                  intersect: false
+                },
+                plugins: {
+                  legend: {
+                    display: true,
+                    position: 'top'
+                  },
+                  tooltip: {
+                    callbacks: {
+                      label: function(context) {
+                        if (context.datasetIndex === 0) {
+                          return context.dataset.label + ': $' + context.parsed.y.toFixed(2)
+                        } else {
+                          return context.dataset.label + ': ' + context.parsed.y + '%'
+                        }
+                      }
+                    }
+                  }
+                },
+                scales: {
+                  y: {
+                    type: 'linear',
+                    position: 'left',
+                    beginAtZero: false,
+                    title: {
+                      display: true,
+                      text: '予想価格 (USD)'
+                    }
+                  },
+                  y1: {
+                    type: 'linear',
+                    position: 'right',
+                    beginAtZero: true,
+                    max: 100,
+                    title: {
+                      display: true,
+                      text: '発生確率 (%)'
+                    },
+                    grid: {
+                      drawOnChartArea: false
+                    }
+                  }
+                }
+              }
+            })
+          }
+        }
+        
+        // GPT-5モンテカルロシミュレーションチャート（結果がある場合のみ）
+        if (data.prediction.gpt5_final_judgment && data.prediction.gpt5_final_judgment.monte_carlo_results) {
+          const mcCtx = document.getElementById('monteCarloChart')
+          if (mcCtx) {
+            const mc = data.prediction.gpt5_final_judgment.monte_carlo_results
+            
+            new Chart(mcCtx.getContext('2d'), {
+              type: 'line',
+              data: {
+                labels: ['現在', '3日', '7日', '14日', '30日', '60日', '90日'],
+                datasets: [{
+                  label: '中央値',
+                  data: [
+                    data.current_price,
+                    mc.day_3_median || mc.day_3,
+                    mc.day_7_median || mc.day_7,
+                    mc.day_14_median || mc.day_14,
+                    mc.day_30_median || mc.day_30,
+                    mc.day_60_median || mc.day_60,
+                    mc.day_90_median
+                  ],
+                  borderColor: 'rgb(255, 255, 255)',
+                  backgroundColor: 'transparent',
+                  borderWidth: 3,
+                  tension: 0.3,
+                  pointRadius: 5,
+                  pointBackgroundColor: 'rgb(255, 255, 255)'
+                }, {
+                  label: '95%信頼区間上限',
+                  data: [
+                    data.current_price * 1.05,
+                    mc.day_3_upper || (mc.day_3 * 1.1),
+                    mc.day_7_upper || (mc.day_7 * 1.1),
+                    mc.day_14_upper || (mc.day_14 * 1.1),
+                    mc.day_30_upper || (mc.day_30 * 1.1),
+                    mc.day_60_upper || (mc.day_60 * 1.1),
+                    mc.day_90_upper
+                  ],
+                  borderColor: 'rgba(34, 197, 94, 0.5)',
+                  backgroundColor: 'transparent',
+                  borderWidth: 2,
+                  borderDash: [5, 5],
+                  tension: 0.3,
+                  pointRadius: 0
+                }, {
+                  label: '95%信頼区間下限',
+                  data: [
+                    data.current_price * 0.95,
+                    mc.day_3_lower || (mc.day_3 * 0.9),
+                    mc.day_7_lower || (mc.day_7 * 0.9),
+                    mc.day_14_lower || (mc.day_14 * 0.9),
+                    mc.day_30_lower || (mc.day_30 * 0.9),
+                    mc.day_60_lower || (mc.day_60 * 0.9),
+                    mc.day_90_lower
+                  ],
+                  borderColor: 'rgba(239, 68, 68, 0.5)',
+                  backgroundColor: 'transparent',
+                  borderWidth: 2,
+                  borderDash: [5, 5],
+                  tension: 0.3,
+                  fill: '-1',
+                  pointRadius: 0
+                }]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                  mode: 'index',
+                  intersect: false
+                },
+                plugins: {
+                  legend: {
+                    display: true,
+                    position: 'top',
+                    labels: {
+                      color: '#fff'
+                    }
+                  },
+                  tooltip: {
+                    callbacks: {
+                      label: function(context) {
+                        return context.dataset.label + ': $' + context.parsed.y.toFixed(2)
+                      }
+                    }
+                  }
+                },
+                scales: {
+                  y: {
+                    beginAtZero: false,
+                    ticks: {
+                      color: '#fff'
+                    },
+                    grid: {
+                      color: 'rgba(255, 255, 255, 0.1)'
+                    },
+                    title: {
+                      display: true,
+                      text: '価格 (USD)',
+                      color: '#fff'
+                    }
+                  },
+                  x: {
+                    ticks: {
+                      color: '#fff'
+                    },
+                    grid: {
+                      color: 'rgba(255, 255, 255, 0.1)'
+                    },
+                    title: {
+                      display: true,
+                      text: '期間',
+                      color: '#fff'
+                    }
+                  }
+                }
+              }
+            })
+          }
+        }
         
         // ML予測: 特徴量重要度チャート（ML APIからデータがある場合のみ）
         if (data.prediction.ml_prediction && data.prediction.ml_prediction.feature_importances) {

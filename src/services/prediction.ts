@@ -689,10 +689,17 @@ export async function generateGPT5FinalJudgment(
     
     // 全データを構造化してGPT-5に渡す（実際の統計計算結果を含む）
     const comprehensiveData = `
-あなたはプロの金融アナリストです。${symbol}の株式について、以下の全データと**実際に計算された統計分析結果**を総合的に分析し、最終的な投資判断を下してください。
+あなたはプロの金融アナリストかつデータサイエンティストです。${symbol}の株式について、以下の全データと**実際に計算された統計分析結果**を総合的に分析し、**必ずPythonのCode Interpreterを使用して高度な計算を実行し**、最終的な投資判断を下してください。
 
-【実際に計算された統計分析結果】★重要★
-以下は過去30日の実データから計算された結果です：
+【重要】Code Interpreterを使用して以下を実行してください：
+1. モンテカルロシミュレーションによる価格予測
+2. 年率ボラティリティの計算
+3. シャープレシオの計算
+4. 最大ドローダウンの計算
+5. VaR（Value at Risk）の計算
+
+【サーバー側で既に計算された基本統計】★参考値★
+以下は過去30日の実データから計算された基本的な結果です：
 
 1. 基本統計量:
    - 平均価格: $${statisticalAnalysis.basic_stats.mean_price}
@@ -951,16 +958,72 @@ ${prediction.risks.map(r => '- ' + r).join('\n')}
    - 強いトレンドの場合は積極的配分を高めに
 
 6. **upcoming_eventsは${symbol}の実際の決算日やイベントを推測して含めてください**（四半期決算は通常3ヶ月ごと）
+
+【Pythonによる高度な計算の実行指示】
+以下の計算をPythonで実行して、より高度な分析を行ってください：
+
+1. **モンテカルロシミュレーション**による価格予測（1000回シミュレーション）
+   - 幾何ブラウン運動モデルを使用
+   - 3日、7日、14日、30日、60日、90日後の予測
+   - 各予測の信頼区間（5%-95%）を計算
+
+2. **年率ボラティリティ**の計算
+   - 日次リターンの標準偏差 × sqrt(252)
+
+3. **シャープレシオ**の計算
+   - (平均リターン / リターンの標準偏差) × sqrt(252)
+
+4. **最大ドローダウン**の計算
+   - 累積リターンの最大下落率
+
+5. **VaR（Value at Risk）**の計算
+   - 95%信頼区間での最大損失額
+
+**データ:**
+- 過去30日の株価: [${historicalPrices.map((p: number) => p.toFixed(2)).join(', ')}]
+- 現在価格: $${currentPrice}
+
+**必ず上記のPython計算を実行し、その結果をprice_predictionsやscenario_analysisに反映してください。**
+モンテカルロシミュレーションの結果は、統計計算よりも精度が高いため、優先的に使用してください。
 `
     
-    // GPT-5 Responses APIを使用
+    // GPT-5 Responses APIを使用（Code Interpreter有効化）
+    console.log('Calling GPT-5 with Code Interpreter enabled...')
     const response = await openai.responses.create({
       model: 'gpt-5',
-      input: comprehensiveData
+      input: comprehensiveData,
+      // Code Interpreterを有効化
+      tools: [
+        {
+          type: 'code_interpreter',
+          container: { type: 'auto' }
+        }
+      ],
+      tool_choice: 'auto'
     })
     
     // レスポンスからJSON部分を抽出
     const responseText = response.output_text || response.output?.[0]?.content?.[0]?.text || '{}'
+    
+    // Code Interpreterが実行されたかログ出力
+    console.log('GPT-5 Response received. Checking for code execution...')
+    if (response.output && Array.isArray(response.output)) {
+      response.output.forEach((item: any, idx: number) => {
+        if (item.content) {
+          item.content.forEach((content: any, cidx: number) => {
+            if (content.type === 'code_interpreter') {
+              console.log(`Code Interpreter executed at output[${idx}].content[${cidx}]:`, {
+                code: content.code_interpreter?.code?.substring(0, 100),
+                output: content.code_interpreter?.output?.substring(0, 200)
+              })
+            }
+            if (content.type === 'output_file') {
+              console.log(`File generated: ${content.output_file?.file_id}`)
+            }
+          })
+        }
+      })
+    }
     
     // JSONパース（マークダウンのコードブロックを除去）
     const jsonMatch = responseText.match(/\{[\s\S]*\}/)
@@ -971,7 +1034,10 @@ ${prediction.risks.map(r => '- ' + r).join('\n')}
     console.log('GPT-5最終判断生成成功:', {
       action: gpt5Judgment.action,
       confidence: gpt5Judgment.confidence,
-      agrees_with_model: gpt5Judgment.agreement_with_statistical_model?.agrees
+      agrees_with_model: gpt5Judgment.agreement_with_statistical_model?.agrees,
+      used_code_interpreter: response.output?.some((o: any) => 
+        o.content?.some((c: any) => c.type === 'code_interpreter')
+      )
     })
     
     return gpt5Judgment
