@@ -583,7 +583,7 @@ ${prediction.target_price ? `【目標株価】
 目標価格: $${prediction.target_price.toFixed(2)}
 期待リターン: ${prediction.expected_return?.toFixed(1)}%` : ''}
 
-※ GPT-5 APIキーが提供されていないため、詳細な解説は生成されていません
+※ OpenAI APIキーが提供されていないため、詳細な解説は生成されていません
 `
   }
   
@@ -626,45 +626,36 @@ ${prediction.risks.join('\n')}
 500文字程度で、専門用語は避けて平易に説明してください。
 `
     
-    // GPT-5 Responses APIを試行、失敗時はgpt-4oにフォールバック
-    let response;
-    try {
-      response = await openai.responses.create({
-        model: 'gpt-5',
-        input: prompt
-      })
-    } catch (gpt5Error: any) {
-      console.warn('GPT-5 API failed, falling back to gpt-4o:', gpt5Error?.message);
-      // フォールバック: gpt-4o (高性能版)
-      const chatResponse = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-          {
-            role: 'system',
-            content: '個人投資家向けの金融アドバイザーとして、専門的な分析をわかりやすく説明します。'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.7,
-        max_tokens: 1500
-      })
-      // Chat Completions形式をResponses形式に変換
-      response = {
-        output: [{
-          content: [{
-            text: chatResponse.choices[0].message.content || '詳細な解説を生成できませんでした'
-          }]
+    // GPT-4o Chat Completions APIを使用
+    const chatResponse = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        {
+          role: 'system',
+          content: '個人投資家向けの金融アドバイザーとして、専門的な分析をわかりやすく説明します。'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      max_tokens: 1500
+    })
+    
+    // レスポンスを統一形式に変換
+    const response = {
+      output: [{
+        content: [{
+          text: chatResponse.choices[0].message.content || '詳細な解説を生成できませんでした'
         }]
-      } as any
-    }
+      }]
+    } as any
     
     return response.output?.[0]?.content?.[0]?.text || '詳細な解説を生成できませんでした'
     
   } catch (error) {
-    console.error('GPT-5詳細解説生成エラー:', error)
+    console.error('GPT-4o詳細解説生成エラー:', error)
+    console.error('Error details:', error instanceof Error ? error.message : String(error))
     return '詳細な解説の生成中にエラーが発生しました'
   }
 }
