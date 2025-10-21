@@ -97,33 +97,14 @@ JSON形式で回答してください：
 }
 `
       
-      // GPT-4o Chat Completions APIを使用
-      const chatResponse = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-          {
-            role: 'system',
-            content: '金融市場の専門アナリストとしてニュース分析を行います。客観的かつ正確な評価を提供します。'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        response_format: { type: 'json_object' }
+      // GPT-5 Responses APIを使用（Colab動作確認済み）
+      const response = await openai.responses.create({
+        model: 'gpt-5',
+        input: prompt
       })
       
-      // レスポンスを統一形式に変換
-      const response = {
-        output: [{
-          content: [{
-            text: chatResponse.choices[0].message.content || '{}'
-          }]
-        }]
-      } as any
-      
-      // レスポンスからJSON部分を抽出
-      const responseText = response.output?.[0]?.content?.[0]?.text || '{}'
+      // レスポンスからJSON部分を抽出（output_textプロパティを使用）
+      const responseText = response.output_text || response.output?.[0]?.content?.[0]?.text || '{}'
       const gptAnalysis = JSON.parse(responseText)
       
       // GPT-5のスコアとキーワードスコアを統合（GPT-5に70%の重み）

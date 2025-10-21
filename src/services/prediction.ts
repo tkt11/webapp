@@ -626,35 +626,17 @@ ${prediction.risks.join('\n')}
 500文字程度で、専門用語は避けて平易に説明してください。
 `
     
-    // GPT-4o Chat Completions APIを使用
-    const chatResponse = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        {
-          role: 'system',
-          content: '個人投資家向けの金融アドバイザーとして、専門的な分析をわかりやすく説明します。'
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
-      ],
-      max_tokens: 1500
+    // GPT-5 Responses APIを使用（Colab動作確認済み）
+    const response = await openai.responses.create({
+      model: 'gpt-5',
+      input: prompt
     })
     
-    // レスポンスを統一形式に変換
-    const response = {
-      output: [{
-        content: [{
-          text: chatResponse.choices[0].message.content || '詳細な解説を生成できませんでした'
-        }]
-      }]
-    } as any
-    
-    return response.output?.[0]?.content?.[0]?.text || '詳細な解説を生成できませんでした'
+    // output_textプロパティを優先して使用
+    return response.output_text || response.output?.[0]?.content?.[0]?.text || '詳細な解説を生成できませんでした'
     
   } catch (error) {
-    console.error('GPT-4o詳細解説生成エラー:', error)
+    console.error('GPT-5詳細解説生成エラー:', error)
     console.error('Error details:', error instanceof Error ? error.message : String(error))
     return '詳細な解説の生成中にエラーが発生しました'
   }
