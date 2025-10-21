@@ -100,8 +100,7 @@ JSON形式で回答してください：
       // Use GPT-5 Responses API (最新の高性能モデル)
       const response = await openai.responses.create({
         model: 'gpt-5',
-        input: prompt,
-        temperature: 0.7
+        input: prompt
       })
       
       // レスポンスからJSON部分を抽出

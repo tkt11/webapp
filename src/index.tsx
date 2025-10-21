@@ -81,7 +81,7 @@ app.post('/api/analyze', async (c) => {
       symbol
     )
     
-    // GPT-4oによる詳細解説
+    // GPT-5による詳細解説
     const detailedExplanation = await generateDetailedExplanation(
       prediction,
       symbol,
@@ -427,7 +427,7 @@ app.get('/', (c) => {
         <i class="fas fa-chart-line mr-3"></i>
         Stock AI Predictor
       </h1>
-      <p class="text-xl opacity-90">5次元分析 × GPT-4oで株価を予測</p>
+      <p class="text-xl opacity-90">5次元分析 × GPT-5で株価を予測</p>
       <p class="mt-2 text-sm opacity-75">
         テクニカル • ファンダメンタル • センチメント • マクロ経済 • アナリスト評価
       </p>
@@ -534,7 +534,7 @@ app.get('/', (c) => {
 
       <div id="analysis-loading" style="display:none;">
         <div class="loader"></div>
-        <p class="text-center text-gray-600">分析中... GPT-4oで詳細分析を実行しています</p>
+        <p class="text-center text-gray-600">分析中... GPT-5で詳細分析を実行しています</p>
       </div>
 
       <div id="analysis-result" style="display:none;">
@@ -883,7 +883,7 @@ app.get('/', (c) => {
               <h2 class="text-3xl font-bold"><i class="fas fa-newspaper mr-3"></i>センチメント分析詳細</h2>
               <button onclick="closeModal()" class="text-white hover:text-gray-200 text-3xl">&times;</button>
             </div>
-            <p class="mt-2 text-yellow-100">最新ニュースをGPT-4oで分析</p>
+            <p class="mt-2 text-yellow-100">最新ニュースをGPT-5で分析</p>
           </div>
           <div class="p-6">
             <div class="grid grid-cols-2 gap-6 mb-6">
@@ -953,7 +953,7 @@ app.get('/', (c) => {
             </div>
 
             <div class="bg-yellow-50 p-4 rounded-lg mb-6">
-              <h3 class="font-bold text-lg mb-3"><i class="fas fa-robot mr-2"></i>GPT-4o分析</h3>
+              <h3 class="font-bold text-lg mb-3"><i class="fas fa-robot mr-2"></i>GPT-5分析</h3>
               <p class="text-sm text-gray-700 mb-2">最新20件のニュース記事をAIが自動分析し、市場センチメントを評価しています。</p>
               <ul class="space-y-1 text-sm text-gray-700">
                 <li>✓ ニュース見出しと概要を自然言語処理</li>
@@ -1180,7 +1180,7 @@ app.get('/', (c) => {
 
       // 動的ローディングメッセージ
       const loadingDiv = document.getElementById('analysis-loading')
-      let loadingMessage = '分析中... GPT-4oで詳細分析を実行しています'
+      let loadingMessage = '分析中... GPT-5で詳細分析を実行しています'
       if (trainModel && enableBackfit) {
         loadingMessage = '分析中... モデル学習 + バックフィット検証を実行しています（約15-40秒）'
       } else if (trainModel) {
@@ -2557,7 +2557,7 @@ app.get('/', (c) => {
             \` : ''}
 
             <div class="bg-gray-50 p-6 rounded-lg">
-              <h4 class="font-bold mb-3"><i class="fas fa-robot mr-2"></i>GPT-4oによる詳細解説</h4>
+              <h4 class="font-bold mb-3"><i class="fas fa-robot mr-2"></i>GPT-5による詳細解説</h4>
               <p class="text-gray-700 whitespace-pre-wrap">\${data.prediction.detailed_explanation}</p>
             </div>
           </div>

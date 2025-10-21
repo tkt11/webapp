@@ -490,6 +490,12 @@ export async function generateMLPrediction(
     // ML APIからデータが返ってきた場合、追加情報をモックデータで補完
     // （実際のML APIが拡張されるまでの暫定対応）
     if (mlResult) {
+      // キャッシュされた学習結果がある場合、それを使用（trainModel=falseでもML UIを表示）
+      if (mlResult.ml_training && !trainingResult) {
+        console.log(`Using cached training results for ${symbol}`);
+        trainingResult = mlResult.ml_training;
+      }
+      
       // 特徴量重要度のモックデータ（ML APIが返さない場合）
       if (!mlResult.feature_importances) {
         mlResult.feature_importances = [
@@ -533,7 +539,7 @@ export async function generateMLPrediction(
     
     return {
       prediction: mlResult,
-      training: trainingResult
+      training: trainingResult  // キャッシュから取得した学習結果を含む
     };
   } catch (error) {
     console.error('ML prediction error:', error)
@@ -623,8 +629,7 @@ ${prediction.risks.join('\n')}
     // Use GPT-5 Responses API for detailed explanation (最新の高性能モデル)
     const response = await openai.responses.create({
       model: 'gpt-5',
-      input: prompt,
-      temperature: 0.7
+      input: prompt
     })
     
     return response.output?.[0]?.content?.[0]?.text || '詳細な解説を生成できませんでした'

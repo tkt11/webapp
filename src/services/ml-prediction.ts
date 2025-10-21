@@ -26,6 +26,17 @@ export interface MLPredictionResponse {
   model: string;
   features_used: number;
   timestamp: string;
+  // ML予測データ（キャッシュモデル使用時）
+  ml_prediction?: {
+    predicted_price: number;
+    confidence: number;
+    change_percent: number;
+    model: string;
+    features_used: number;
+    timestamp: string;
+  };
+  // ML学習結果（キャッシュされた学習データ）
+  ml_training?: MLTrainingResponse;
   // 追加: ML学習詳細情報
   feature_importances?: {
     feature: string;
