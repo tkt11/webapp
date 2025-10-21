@@ -82,6 +82,28 @@ export interface PredictionResult {
   target_price: number | null
   expected_return: number | null
   detailed_explanation?: string
+  gpt5_final_judgment?: GPT5FinalJudgment
+}
+
+export interface GPT5FinalJudgment {
+  action: 'BUY' | 'SELL' | 'HOLD'
+  confidence: number
+  reasoning: string
+  key_factors: {
+    most_important: string[]
+    supporting_data: string[]
+    concerns: string[]
+  }
+  agreement_with_statistical_model: {
+    agrees: boolean
+    reason: string
+  }
+  risk_assessment: {
+    level: 'LOW' | 'MEDIUM' | 'HIGH'
+    description: string
+  }
+  recommendation: string
+  data_sources_used: string[]
 }
 
 export interface StockData {

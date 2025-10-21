@@ -4,7 +4,8 @@ import type {
   FundamentalAnalysis, 
   SentimentAnalysis, 
   MacroAnalysis, 
-  AnalystRating 
+  AnalystRating,
+  GPT5FinalJudgment
 } from '../types'
 import OpenAI from 'openai'
 import { 
@@ -547,6 +548,184 @@ export async function generateMLPrediction(
       prediction: null,
       training: null
     };
+  }
+}
+
+// GPT-5による最終判断を生成（全データを統合分析）
+export async function generateGPT5FinalJudgment(
+  symbol: string,
+  currentPrice: number,
+  prediction: PredictionResult,
+  technical: TechnicalAnalysis,
+  fundamental: FundamentalAnalysis,
+  sentiment: SentimentAnalysis,
+  macro: MacroAnalysis,
+  analyst: AnalystRating,
+  mlPrediction: any,
+  mlTraining: any,
+  backfitAccuracy: any,
+  futurePrediction: any,
+  apiKey?: string
+): Promise<GPT5FinalJudgment | null> {
+  
+  if (!apiKey) {
+    return null
+  }
+  
+  try {
+    const openai = new OpenAI({ 
+      apiKey,
+      organization: 'org-C3x5ZVIvaiCoQSoLIKqg9X5E'
+    })
+    
+    // 全データを構造化してGPT-5に渡す
+    const comprehensiveData = `
+あなたはプロの金融アナリストです。${symbol}の株式について、以下の全データを総合的に分析し、最終的な投資判断を下してください。
+
+【現在の株価情報】
+- 銘柄: ${symbol}
+- 現在価格: $${currentPrice.toFixed(2)}
+
+【統計モデルによる判定】
+- アクション: ${prediction.action}
+- 総合スコア: ${prediction.score}/100
+- 信頼度: ${prediction.confidence}%
+- 目標株価: ${prediction.target_price ? '$' + prediction.target_price.toFixed(2) : 'N/A'}
+- 期待リターン: ${prediction.expected_return ? prediction.expected_return.toFixed(1) + '%' : 'N/A'}
+
+【5次元分析の詳細スコア】
+1. テクニカル分析: ${prediction.breakdown.technical}/100
+   - SMA20: $${technical.sma20.toFixed(2)}
+   - SMA50: $${technical.sma50.toFixed(2)}
+   - RSI: ${technical.rsi.toFixed(2)}
+   - MACD: ${technical.macd.macd.toFixed(2)}
+   - シグナル: ${technical.signals.slice(0, 5).join(', ')}
+
+2. ファンダメンタル分析: ${prediction.breakdown.fundamental}/100
+   - PER: ${fundamental.pe_ratio || 'N/A'}
+   - PBR: ${fundamental.pb_ratio || 'N/A'}
+   - ROE: ${fundamental.roe ? fundamental.roe.toFixed(2) + '%' : 'N/A'}
+   - EPS: ${fundamental.eps ? '$' + fundamental.eps.toFixed(2) : 'N/A'}
+   - 配当利回り: ${fundamental.dividend_yield ? fundamental.dividend_yield.toFixed(2) + '%' : 'N/A'}
+   - 時価総額: ${fundamental.market_cap ? '$' + (fundamental.market_cap / 1e9).toFixed(2) + 'B' : 'N/A'}
+   - シグナル: ${fundamental.signals.slice(0, 5).join(', ')}
+
+3. センチメント分析: ${prediction.breakdown.sentiment}/100
+   - 全体センチメント: ${sentiment.sentiment}
+   - ニュース件数: ${sentiment.news_count}件
+   - ポジティブ: ${sentiment.positive_count || 0}件
+   - ネガティブ: ${sentiment.negative_count || 0}件
+   - 中立: ${sentiment.neutral_count || 0}件
+   - 要約: ${sentiment.summary}
+   ${sentiment.gpt_insight ? '- GPT分析: ' + sentiment.gpt_insight.substring(0, 200) : ''}
+
+4. マクロ経済分析: ${prediction.breakdown.macro}/100
+   - GDP成長率: ${macro.gdp_growth ? macro.gdp_growth.toFixed(2) + '%' : 'N/A'}
+   - 失業率: ${macro.unemployment ? macro.unemployment.toFixed(2) + '%' : 'N/A'}
+   - インフレ率: ${macro.inflation ? macro.inflation.toFixed(2) + '%' : 'N/A'}
+   - 金利: ${macro.interest_rate ? macro.interest_rate.toFixed(2) + '%' : 'N/A'}
+   - シグナル: ${macro.signals.slice(0, 3).join(', ')}
+
+5. アナリスト評価: ${prediction.breakdown.analyst}/100
+   - コンセンサス: ${analyst.consensus || 'N/A'}
+   - 目標株価: ${analyst.target_price ? '$' + analyst.target_price.toFixed(2) : 'N/A'}
+   - 上値余地: ${analyst.upside ? analyst.upside.toFixed(1) + '%' : 'N/A'}
+   - レーティング数: ${analyst.recommendation_count}件
+
+【機械学習予測】
+${mlPrediction ? `
+- ML予測価格: $${mlPrediction.predicted_price?.toFixed(2) || 'N/A'}
+- 予測期間: ${mlPrediction.prediction_horizon || 'N/A'}日後
+- 信頼区間: $${mlPrediction.confidence_interval?.lower?.toFixed(2) || 'N/A'} - $${mlPrediction.confidence_interval?.upper?.toFixed(2) || 'N/A'}
+` : '- ML予測データなし'}
+
+【ML学習結果】
+${mlTraining ? `
+- モデルID: ${mlTraining.model_id || 'N/A'}
+- 学習期間: ${mlTraining.training_duration || 'N/A'}秒
+- バックテスト精度:
+  - RMSE: ${mlTraining.backtest_metrics?.rmse?.toFixed(2) || 'N/A'}
+  - MAE: ${mlTraining.backtest_metrics?.mae?.toFixed(2) || 'N/A'}
+  - R²スコア: ${mlTraining.backtest_metrics?.r2_score?.toFixed(3) || 'N/A'}
+  - 方向性正解率: ${mlTraining.backtest_metrics?.direction_accuracy?.toFixed(1) || 'N/A'}%
+` : '- ML学習データなし'}
+
+【統計予測のバックテスト精度】
+${backfitAccuracy ? `
+- RMSE: ${backfitAccuracy.rmse}
+- MAE: ${backfitAccuracy.mae}
+- MAPE: ${backfitAccuracy.mape}%
+- 方向性正解率: ${backfitAccuracy.directionAccuracy}%
+` : ''}
+
+【30日間の未来予測】
+${futurePrediction ? `
+- 推奨購入日: ${futurePrediction.buyDate}
+- 推奨購入価格: $${futurePrediction.buyPrice.toFixed(2)}
+- 推奨売却日: ${futurePrediction.sellDate}
+- 推奨売却価格: $${futurePrediction.sellPrice.toFixed(2)}
+- 予想利益率: ${futurePrediction.profitPercent.toFixed(2)}%
+` : ''}
+
+【統計モデルの主要理由】
+ポジティブ要因:
+${prediction.reasons.map(r => '- ' + r).join('\n')}
+
+リスク要因:
+${prediction.risks.map(r => '- ' + r).join('\n')}
+
+【分析依頼】
+上記の全データを総合的に分析し、以下のJSON形式で回答してください：
+
+{
+  "action": "BUY/SELL/HOLD のいずれか",
+  "confidence": 0-100の数値,
+  "reasoning": "あなたの判断理由を300文字程度で詳しく説明",
+  "key_factors": {
+    "most_important": ["最も重要と判断した要因3つ"],
+    "supporting_data": ["判断を支持するデータポイント5つ"],
+    "concerns": ["懸念点や注意すべき点3つ"]
+  },
+  "agreement_with_statistical_model": {
+    "agrees": true/false,
+    "reason": "統計モデルの判定(${prediction.action})と一致するか、相違する場合はその理由"
+  },
+  "risk_assessment": {
+    "level": "LOW/MEDIUM/HIGH",
+    "description": "リスクレベルの詳細説明"
+  },
+  "recommendation": "投資家への具体的な推奨事項（200文字程度）",
+  "data_sources_used": ["判断に使用した主要データソース5つ（例: テクニカル分析, ML予測精度, センチメント等）"]
+}
+`
+    
+    // GPT-5 Responses APIを使用
+    const response = await openai.responses.create({
+      model: 'gpt-5',
+      input: comprehensiveData
+    })
+    
+    // レスポンスからJSON部分を抽出
+    const responseText = response.output_text || response.output?.[0]?.content?.[0]?.text || '{}'
+    
+    // JSONパース（マークダウンのコードブロックを除去）
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/)
+    const jsonText = jsonMatch ? jsonMatch[0] : responseText
+    
+    const gpt5Judgment = JSON.parse(jsonText)
+    
+    console.log('GPT-5最終判断生成成功:', {
+      action: gpt5Judgment.action,
+      confidence: gpt5Judgment.confidence,
+      agrees_with_model: gpt5Judgment.agreement_with_statistical_model?.agrees
+    })
+    
+    return gpt5Judgment
+    
+  } catch (error) {
+    console.error('GPT-5最終判断生成エラー:', error)
+    console.error('Error details:', error instanceof Error ? error.message : String(error))
+    return null
   }
 }
 

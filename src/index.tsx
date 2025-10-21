@@ -6,7 +6,7 @@ import { performFundamentalAnalysis } from './services/fundamental'
 import { performSentimentAnalysis } from './services/sentiment'
 import { analyzeMacroEconomics } from './services/macro'
 import { analyzeAnalystRating } from './services/analyst'
-import { generatePrediction, generateDetailedExplanation, generateFuturePrediction, generateBackfitPrediction, generateMLPrediction } from './services/prediction'
+import { generatePrediction, generateDetailedExplanation, generateFuturePrediction, generateBackfitPrediction, generateMLPrediction, generateGPT5FinalJudgment } from './services/prediction'
 import { runInvestmentSimulation, runBacktest } from './services/simulation'
 import {
   fetchStockPrices,
@@ -119,6 +119,24 @@ app.post('/api/analyze', async (c) => {
       enableBackfit  // バックフィット検証フラグを渡す
     )
     
+    // GPT-5による最終判断を生成（全データを統合分析）
+    console.log('Generating GPT-5 final judgment with all analysis data...')
+    const gpt5FinalJudgment = await generateGPT5FinalJudgment(
+      symbol,
+      currentPrice,
+      prediction,
+      technical,
+      fundamental,
+      sentiment,
+      macro,
+      analyst,
+      mlResult.prediction,
+      mlResult.training,
+      backfitPrediction.accuracy,
+      futurePrediction,
+      env.OPENAI_API_KEY
+    )
+    
     return c.json({
       symbol,
       current_price: currentPrice,
@@ -128,7 +146,8 @@ app.post('/api/analyze', async (c) => {
         future: futurePrediction,
         backfit: backfitPrediction,
         ml_prediction: mlResult.prediction,  // ML予測
-        ml_training: mlResult.training        // 学習結果（存在する場合）
+        ml_training: mlResult.training,      // 学習結果（存在する場合）
+        gpt5_final_judgment: gpt5FinalJudgment  // GPT-5最終判断
       },
       analysis: {
         technical,
@@ -2556,10 +2575,130 @@ app.get('/', (c) => {
               </div>
             \` : ''}
 
-            <div class="bg-gray-50 p-6 rounded-lg">
+            <div class="bg-gray-50 p-6 rounded-lg mb-6">
               <h4 class="font-bold mb-3"><i class="fas fa-robot mr-2"></i>GPT-5による詳細解説</h4>
               <p class="text-gray-700 whitespace-pre-wrap">\${data.prediction.detailed_explanation}</p>
             </div>
+
+            \${data.prediction.gpt5_final_judgment ? \`
+            <!-- GPT-5最終判断セクション -->
+            <div class="bg-gradient-to-br from-purple-600 to-indigo-700 p-6 rounded-lg shadow-xl mb-6 text-white">
+              <div class="flex items-center mb-4">
+                <i class="fas fa-brain text-4xl mr-4"></i>
+                <div>
+                  <h4 class="font-bold text-2xl">GPT-5 最終判断</h4>
+                  <p class="text-sm opacity-90">全データを統合したAIによる最終ジャッジ</p>
+                </div>
+              </div>
+              
+              <!-- アクションと信頼度 -->
+              <div class="grid grid-cols-2 gap-4 mb-6">
+                <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg">
+                  <p class="text-sm opacity-90 mb-2">最終判定</p>
+                  <p class="text-3xl font-bold">
+                    \${data.prediction.gpt5_final_judgment.action}
+                    \${data.prediction.gpt5_final_judgment.action === 'BUY' ? '🚀' : data.prediction.gpt5_final_judgment.action === 'SELL' ? '⚠️' : '⏸️'}
+                  </p>
+                </div>
+                <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg">
+                  <p class="text-sm opacity-90 mb-2">AI信頼度</p>
+                  <p class="text-3xl font-bold">\${data.prediction.gpt5_final_judgment.confidence}%</p>
+                </div>
+              </div>
+
+              <!-- 統計モデルとの比較 -->
+              <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
+                <div class="flex items-center mb-2">
+                  <i class="fas fa-balance-scale mr-2"></i>
+                  <h5 class="font-bold">統計モデルとの比較</h5>
+                </div>
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm opacity-90">統計モデル判定: <span class="font-bold">\${data.prediction.action}</span></p>
+                    <p class="text-sm opacity-90">GPT-5判定: <span class="font-bold">\${data.prediction.gpt5_final_judgment.action}</span></p>
+                  </div>
+                  <div class="text-right">
+                    <span class="text-2xl">
+                      \${data.prediction.gpt5_final_judgment.agreement_with_statistical_model.agrees ? '✅' : '⚠️'}
+                    </span>
+                    <p class="text-xs mt-1">
+                      \${data.prediction.gpt5_final_judgment.agreement_with_statistical_model.agrees ? '一致' : '相違あり'}
+                    </p>
+                  </div>
+                </div>
+                <p class="text-sm mt-2 bg-white bg-opacity-10 p-2 rounded">
+                  \${data.prediction.gpt5_final_judgment.agreement_with_statistical_model.reason}
+                </p>
+              </div>
+
+              <!-- 判断理由 -->
+              <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
+                <h5 class="font-bold mb-2"><i class="fas fa-comment-dots mr-2"></i>判断理由</h5>
+                <p class="text-sm leading-relaxed">\${data.prediction.gpt5_final_judgment.reasoning}</p>
+              </div>
+
+              <!-- 主要要因 -->
+              <div class="grid grid-cols-3 gap-4 mb-4">
+                <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg">
+                  <h5 class="font-bold mb-2 text-sm"><i class="fas fa-star mr-1"></i>最重要要因</h5>
+                  <ul class="space-y-1">
+                    \${data.prediction.gpt5_final_judgment.key_factors.most_important.map(f => \`
+                      <li class="text-xs">• \${f}</li>
+                    \`).join('')}
+                  </ul>
+                </div>
+                <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg">
+                  <h5 class="font-bold mb-2 text-sm"><i class="fas fa-check-circle mr-1"></i>支持データ</h5>
+                  <ul class="space-y-1">
+                    \${data.prediction.gpt5_final_judgment.key_factors.supporting_data.slice(0, 3).map(f => \`
+                      <li class="text-xs">• \${f}</li>
+                    \`).join('')}
+                  </ul>
+                </div>
+                <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg">
+                  <h5 class="font-bold mb-2 text-sm"><i class="fas fa-exclamation-triangle mr-1"></i>懸念点</h5>
+                  <ul class="space-y-1">
+                    \${data.prediction.gpt5_final_judgment.key_factors.concerns.map(f => \`
+                      <li class="text-xs">• \${f}</li>
+                    \`).join('')}
+                  </ul>
+                </div>
+              </div>
+
+              <!-- リスク評価 -->
+              <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
+                <div class="flex items-center justify-between mb-2">
+                  <h5 class="font-bold"><i class="fas fa-shield-alt mr-2"></i>リスク評価</h5>
+                  <span class="px-3 py-1 rounded-full text-sm font-bold \${
+                    data.prediction.gpt5_final_judgment.risk_assessment.level === 'LOW' ? 'bg-green-500' :
+                    data.prediction.gpt5_final_judgment.risk_assessment.level === 'MEDIUM' ? 'bg-yellow-500 text-gray-900' :
+                    'bg-red-500'
+                  }">
+                    \${data.prediction.gpt5_final_judgment.risk_assessment.level}
+                  </span>
+                </div>
+                <p class="text-sm">\${data.prediction.gpt5_final_judgment.risk_assessment.description}</p>
+              </div>
+
+              <!-- 推奨事項 -->
+              <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
+                <h5 class="font-bold mb-2"><i class="fas fa-lightbulb mr-2"></i>投資家への推奨</h5>
+                <p class="text-sm leading-relaxed">\${data.prediction.gpt5_final_judgment.recommendation}</p>
+              </div>
+
+              <!-- 使用データソース -->
+              <div class="bg-white bg-opacity-10 p-3 rounded-lg">
+                <p class="text-xs opacity-75 mb-2">
+                  <i class="fas fa-database mr-1"></i>分析に使用したデータソース:
+                </p>
+                <div class="flex flex-wrap gap-2">
+                  \${data.prediction.gpt5_final_judgment.data_sources_used.map(source => \`
+                    <span class="text-xs bg-white bg-opacity-20 px-2 py-1 rounded">\${source}</span>
+                  \`).join('')}
+                </div>
+              </div>
+            </div>
+            \` : ''}
           </div>
 
           <div class="bg-white rounded-lg shadow-md p-6">
