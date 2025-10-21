@@ -97,11 +97,40 @@ JSON形式で回答してください：
 }
 `
       
-      // Use GPT-5 Responses API (最新の高性能モデル)
-      const response = await openai.responses.create({
-        model: 'gpt-5',
-        input: prompt
-      })
+      // GPT-5 Responses APIを試行、失敗時はgpt-4o-miniにフォールバック
+      let response;
+      try {
+        response = await openai.responses.create({
+          model: 'gpt-5',
+          input: prompt
+        })
+      } catch (gpt5Error: any) {
+        console.warn('GPT-5 API failed, falling back to gpt-4o-mini:', gpt5Error?.message);
+        // フォールバック: gpt-4o-mini (安定版)
+        const chatResponse = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [
+            {
+              role: 'system',
+              content: '金融市場の専門アナリストとしてニュース分析を行います。客観的かつ正確な評価を提供します。'
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          response_format: { type: 'json_object' },
+          temperature: 0.7
+        })
+        // Chat Completions形式をResponses形式に変換
+        response = {
+          output: [{
+            content: [{
+              text: chatResponse.choices[0].message.content || '{}'
+            }]
+          }]
+        } as any
+      }
       
       // レスポンスからJSON部分を抽出
       const responseText = response.output?.[0]?.content?.[0]?.text || '{}'

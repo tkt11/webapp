@@ -626,11 +626,40 @@ ${prediction.risks.join('\n')}
 500文字程度で、専門用語は避けて平易に説明してください。
 `
     
-    // Use GPT-5 Responses API for detailed explanation (最新の高性能モデル)
-    const response = await openai.responses.create({
-      model: 'gpt-5',
-      input: prompt
-    })
+    // GPT-5 Responses APIを試行、失敗時はgpt-4o-miniにフォールバック
+    let response;
+    try {
+      response = await openai.responses.create({
+        model: 'gpt-5',
+        input: prompt
+      })
+    } catch (gpt5Error: any) {
+      console.warn('GPT-5 API failed, falling back to gpt-4o-mini:', gpt5Error?.message);
+      // フォールバック: gpt-4o-mini (安定版)
+      const chatResponse = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: '個人投資家向けの金融アドバイザーとして、専門的な分析をわかりやすく説明します。'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 1500
+      })
+      // Chat Completions形式をResponses形式に変換
+      response = {
+        output: [{
+          content: [{
+            text: chatResponse.choices[0].message.content || '詳細な解説を生成できませんでした'
+          }]
+        }]
+      } as any
+    }
     
     return response.output?.[0]?.content?.[0]?.text || '詳細な解説を生成できませんでした'
     
