@@ -39,6 +39,10 @@ request_counter = {
     "last_reset": datetime.now().date()
 }
 
+# モデルキャッシュ（銘柄ごとに学習済みモデルを保持）
+# {symbol: {"model": lgb.Booster, "feature_names": List[str], "timestamp": datetime}}
+model_cache: Dict[str, Dict] = {}
+
 # モデルの初期化(ダミーモデル - 本番では事前学習済みモデルをロード)
 # 実際のプロダクション環境では、事前に学習したモデルをファイルから読み込む
 model = None
@@ -53,6 +57,25 @@ def initialize_model():
     # デモ用: ランダムな予測を返すダミー実装
     # 実際の実装では、ここで学習済みモデルをロード
     pass
+
+def get_cached_model(symbol: str):
+    """Get cached model for a symbol if available"""
+    if symbol in model_cache:
+        cached = model_cache[symbol]
+        # キャッシュが7日以内なら有効
+        if (datetime.now() - cached["timestamp"]).days < 7:
+            print(f"📦 Using cached model for {symbol} (age: {(datetime.now() - cached['timestamp']).seconds}s)")
+            return cached["model"], cached["feature_names"]
+    return None, None
+
+def cache_model(symbol: str, model: lgb.Booster, feature_names: List[str]):
+    """Cache a trained model for a symbol"""
+    model_cache[symbol] = {
+        "model": model,
+        "feature_names": feature_names,
+        "timestamp": datetime.now()
+    }
+    print(f"💾 Cached model for {symbol}")
 
 initialize_model()
 
@@ -93,6 +116,9 @@ class PredictionResponse(BaseModel):
     model: str
     features_used: int
     timestamp: str
+    ml_prediction: Optional[Dict[str, Any]] = None  # ML予測データ（キャッシュモデル使用時）
+    future_predictions: Optional['FuturePrediction'] = None  # 未来30日予測
+    backfit_predictions: Optional['BackfitPrediction'] = None  # 過去30日バックフィット予測
 
 # トレーニングレスポンスモデル
 class TrainingDataInfo(BaseModel):
@@ -230,6 +256,9 @@ async def predict(request: Request, data: PredictionRequest):
         )
     
     try:
+        # キャッシュされたモデルを取得
+        cached_model, cached_feature_names = get_cached_model(data.symbol)
+        
         # 特徴量エンジニアリング
         prices = np.array(data.prices)
         
@@ -237,21 +266,24 @@ async def predict(request: Request, data: PredictionRequest):
         sma_5 = np.mean(prices[-5:]) if len(prices) >= 5 else np.mean(prices)
         sma_10 = np.mean(prices[-10:]) if len(prices) >= 10 else np.mean(prices)
         sma_20 = np.mean(prices[-20:]) if len(prices) >= 20 else np.mean(prices)
+        sma_50 = np.mean(prices[-50:]) if len(prices) >= 50 else np.mean(prices)
         
         # ボラティリティ
         volatility = np.std(prices[-30:]) if len(prices) >= 30 else np.std(prices)
+        volatility_ratio = volatility / prices[-1] if prices[-1] != 0 else 0
         
         # 価格変化率
         price_change = (prices[-1] - prices[0]) / prices[0] * 100 if len(prices) > 0 else 0
+        momentum_5 = (prices[-1] - prices[-5]) / prices[-5] if len(prices) >= 5 and prices[-5] != 0 else 0
+        momentum_10 = (prices[-1] - prices[-10]) / prices[-10] if len(prices) >= 10 and prices[-10] != 0 else 0
+        momentum_20 = (prices[-1] - prices[-20]) / prices[-20] if len(prices) >= 20 and prices[-20] != 0 else 0
         
-        # 特徴量ベクトル作成
+        # 特徴量ベクトル作成（学習時と同じ順序・構造）
         features = [
-            prices[-1],  # 現在価格
-            sma_5,
-            sma_10,
-            sma_20,
-            volatility,
-            price_change,
+            prices[-1],  # price
+            sma_5, sma_10, sma_20, sma_50,
+            volatility, volatility_ratio,
+            momentum_5, momentum_10, momentum_20,
             data.rsi / 100 if data.rsi else 0.5,
             data.macd if data.macd else 0,
             data.sentiment_score / 100 if data.sentiment_score else 0.5,
@@ -263,20 +295,26 @@ async def predict(request: Request, data: PredictionRequest):
         features_array = np.array(features).reshape(1, -1)
         
         # 予測実行
-        # 実際の本番環境では、ここで学習済みモデルを使用
-        # prediction = model.predict(features_array)[0]
-        
-        # デモ用: 統計的予測 + ランダムノイズ
-        # SMAベースの予測にトレンドとセンチメントを加味
-        trend_factor = 1 + (price_change / 100) * 0.3
-        sentiment_factor = 1 + ((data.sentiment_score - 50) / 100) * 0.1 if data.sentiment_score else 1
-        rsi_factor = 1 + ((data.rsi - 50) / 100) * 0.05 if data.rsi else 1
-        
-        base_prediction = sma_5 * trend_factor * sentiment_factor * rsi_factor
-        
-        # ランダムノイズ追加(±2%)
-        noise = np.random.uniform(-0.02, 0.02)
-        prediction = base_prediction * (1 + noise)
+        if cached_model is not None:
+            # キャッシュされたモデルを使用
+            print(f"🤖 Using cached model for prediction (symbol: {data.symbol})")
+            prediction = cached_model.predict(features_array, num_iteration=cached_model.best_iteration)[0]
+            model_name = f"LightGBM v1.0 (Trained for {data.symbol})"
+            base_confidence = 0.85  # 学習済みモデルは高信頼度
+        else:
+            # デモ用: 統計的予測（学習済みモデルがない場合）
+            print(f"⚠️  No cached model found for {data.symbol}, using statistical fallback")
+            trend_factor = 1 + (price_change / 100) * 0.3
+            sentiment_factor = 1 + ((data.sentiment_score - 50) / 100) * 0.1 if data.sentiment_score else 1
+            rsi_factor = 1 + ((data.rsi - 50) / 100) * 0.05 if data.rsi else 1
+            
+            base_prediction = sma_5 * trend_factor * sentiment_factor * rsi_factor
+            
+            # ランダムノイズ追加(±2%)
+            noise = np.random.uniform(-0.02, 0.02)
+            prediction = base_prediction * (1 + noise)
+            model_name = "LightGBM v1.0 (Statistical Hybrid)"
+            base_confidence = 0.70  # 統計モデルは中信頼度
         
         # 信頼度計算
         # センチメントとRSIの中立性からの距離で信頼度を調整
@@ -284,7 +322,6 @@ async def predict(request: Request, data: PredictionRequest):
         rsi_confidence = 1 - abs(data.rsi - 50) / 50 if data.rsi else 0.5
         volatility_penalty = min(0.3, volatility / prices[-1] * 2)
         
-        base_confidence = 0.70
         confidence = base_confidence + (sentiment_confidence * 0.1) + (rsi_confidence * 0.1) - volatility_penalty
         confidence = max(0.4, min(0.95, confidence))
         
@@ -295,14 +332,27 @@ async def predict(request: Request, data: PredictionRequest):
         request_counter["daily"] += 1
         request_counter["total"] += 1
         
+        # キャッシュモデルを使用した場合、ml_predictionオブジェクトを生成
+        ml_pred_obj = None
+        if cached_model is not None:
+            ml_pred_obj = {
+                "predicted_price": round(float(prediction), 2),
+                "confidence": round(float(confidence), 2),
+                "change_percent": round(float(change_percent), 2),
+                "model": model_name,
+                "features_used": len(features),
+                "timestamp": datetime.now().isoformat()
+            }
+        
         return PredictionResponse(
             symbol=data.symbol,
             predicted_price=round(float(prediction), 2),
             confidence=round(float(confidence), 2),
             change_percent=round(float(change_percent), 2),
-            model="LightGBM v1.0 (Statistical Hybrid)",
+            model=model_name,
             features_used=len(features),
-            timestamp=datetime.now().isoformat()
+            timestamp=datetime.now().isoformat(),
+            ml_prediction=ml_pred_obj  # キャッシュモデル使用時のみ設定
         )
     
     except Exception as e:
@@ -713,6 +763,9 @@ async def train_model(request: Request, data: PredictionRequest):
         # モデルIDの生成
         model_id = f"{data.symbol}_custom_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
+        # モデルをキャッシュに保存（7日間有効）
+        cache_model(data.symbol, model, feature_names)
+        
         # モデルを一時ファイルに保存（オプション：後で永続化可能）
         # temp_model_file = f"/tmp/{model_id}.txt"
         # model.save_model(temp_model_file)
@@ -722,6 +775,7 @@ async def train_model(request: Request, data: PredictionRequest):
         print(f"✅ Training complete for {data.symbol}!")
         print(f"   Duration: {training_duration:.1f} seconds")
         print(f"   Model ID: {model_id}")
+        print(f"   📦 Model cached for future predictions (valid for 7 days)")
         print(f"{'='*60}\n")
         
         # レスポンス作成
