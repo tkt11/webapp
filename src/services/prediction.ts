@@ -582,7 +582,10 @@ ${prediction.target_price ? `【目標株価】
   }
   
   try {
-    const openai = new OpenAI({ apiKey })
+    const openai = new OpenAI({ 
+      apiKey,
+      organization: 'org-C3x5ZVIvaiCoQSoLIKqg9X5E'
+    })
     
     const prompt = `
 あなたは個人投資家向けの金融アドバイザーです。${symbol}の投資判断について、初心者にもわかりやすく説明してください。
@@ -617,24 +620,14 @@ ${prediction.risks.join('\n')}
 500文字程度で、専門用語は避けて平易に説明してください。
 `
     
-    // Use GPT-4o for detailed explanation (GPT-5相当の最新モデル)
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        {
-          role: 'system',
-          content: '個人投資家向けの金融アドバイザーとして、専門的な分析をわかりやすく説明します。'
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
-      ],
-      temperature: 0.7,
-      max_tokens: 1500
+    // Use GPT-5 Responses API for detailed explanation (最新の高性能モデル)
+    const response = await openai.responses.create({
+      model: 'gpt-5',
+      input: prompt,
+      temperature: 0.7
     })
     
-    return response.choices[0].message.content || '詳細な解説を生成できませんでした'
+    return response.output?.[0]?.content?.[0]?.text || '詳細な解説を生成できませんでした'
     
   } catch (error) {
     console.error('GPT-5詳細解説生成エラー:', error)

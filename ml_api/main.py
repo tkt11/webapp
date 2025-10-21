@@ -39,8 +39,8 @@ request_counter = {
     "last_reset": datetime.now().date()
 }
 
-# モデルキャッシュ（銘柄ごとに学習済みモデルを保持）
-# {symbol: {"model": lgb.Booster, "feature_names": List[str], "timestamp": datetime}}
+# モデルキャッシュ（銘柄ごとに学習済みモデルと学習結果を保持）
+# {symbol: {"model": lgb.Booster, "feature_names": List[str], "training_response": Dict, "timestamp": datetime}}
 model_cache: Dict[str, Dict] = {}
 
 # モデルの初期化(ダミーモデル - 本番では事前学習済みモデルをロード)
@@ -59,20 +59,21 @@ def initialize_model():
     pass
 
 def get_cached_model(symbol: str):
-    """Get cached model for a symbol if available"""
+    """Get cached model and training results for a symbol if available"""
     if symbol in model_cache:
         cached = model_cache[symbol]
         # キャッシュが7日以内なら有効
         if (datetime.now() - cached["timestamp"]).days < 7:
             print(f"📦 Using cached model for {symbol} (age: {(datetime.now() - cached['timestamp']).seconds}s)")
-            return cached["model"], cached["feature_names"]
-    return None, None
+            return cached["model"], cached["feature_names"], cached.get("training_response")
+    return None, None, None
 
-def cache_model(symbol: str, model: lgb.Booster, feature_names: List[str]):
-    """Cache a trained model for a symbol"""
+def cache_model(symbol: str, model: lgb.Booster, feature_names: List[str], training_response: Optional[Dict] = None):
+    """Cache a trained model and training results for a symbol"""
     model_cache[symbol] = {
         "model": model,
         "feature_names": feature_names,
+        "training_response": training_response,
         "timestamp": datetime.now()
     }
     print(f"💾 Cached model for {symbol}")
@@ -117,6 +118,7 @@ class PredictionResponse(BaseModel):
     features_used: int
     timestamp: str
     ml_prediction: Optional[Dict[str, Any]] = None  # ML予測データ（キャッシュモデル使用時）
+    ml_training: Optional[Dict[str, Any]] = None  # ML学習結果（キャッシュされた学習データ）
     future_predictions: Optional['FuturePrediction'] = None  # 未来30日予測
     backfit_predictions: Optional['BackfitPrediction'] = None  # 過去30日バックフィット予測
 
@@ -256,8 +258,8 @@ async def predict(request: Request, data: PredictionRequest):
         )
     
     try:
-        # キャッシュされたモデルを取得
-        cached_model, cached_feature_names = get_cached_model(data.symbol)
+        # キャッシュされたモデルと学習結果を取得
+        cached_model, cached_feature_names, cached_training = get_cached_model(data.symbol)
         
         # 特徴量エンジニアリング
         prices = np.array(data.prices)
@@ -352,7 +354,8 @@ async def predict(request: Request, data: PredictionRequest):
             model=model_name,
             features_used=len(features),
             timestamp=datetime.now().isoformat(),
-            ml_prediction=ml_pred_obj  # キャッシュモデル使用時のみ設定
+            ml_prediction=ml_pred_obj,  # キャッシュモデル使用時のみ設定
+            ml_training=cached_training  # キャッシュされた学習結果
         )
     
     except Exception as e:
@@ -763,23 +766,8 @@ async def train_model(request: Request, data: PredictionRequest):
         # モデルIDの生成
         model_id = f"{data.symbol}_custom_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
-        # モデルをキャッシュに保存（7日間有効）
-        cache_model(data.symbol, model, feature_names)
-        
-        # モデルを一時ファイルに保存（オプション：後で永続化可能）
-        # temp_model_file = f"/tmp/{model_id}.txt"
-        # model.save_model(temp_model_file)
-        # print(f"💾 Model saved to: {temp_model_file}")
-        
-        print(f"\n{'='*60}")
-        print(f"✅ Training complete for {data.symbol}!")
-        print(f"   Duration: {training_duration:.1f} seconds")
-        print(f"   Model ID: {model_id}")
-        print(f"   📦 Model cached for future predictions (valid for 7 days)")
-        print(f"{'='*60}\n")
-        
         # レスポンス作成
-        return TrainingResponse(
+        training_response = TrainingResponse(
             success=True,
             model_id=model_id,
             symbol=data.symbol,
@@ -824,6 +812,18 @@ async def train_model(request: Request, data: PredictionRequest):
             future_predictions=future_pred,  # 未来30日予測を追加
             backfit_predictions=backfit_pred  # 過去30日バックフィット予測を追加
         )
+        
+        # モデルと学習結果をキャッシュに保存（7日間有効）
+        cache_model(data.symbol, model, feature_names, training_response.model_dump())
+        
+        print(f"\n{'='*60}")
+        print(f"✅ Training complete for {data.symbol}!")
+        print(f"   Duration: {training_duration:.1f} seconds")
+        print(f"   Model ID: {model_id}")
+        print(f"   📦 Model and training results cached (valid for 7 days)")
+        print(f"{'='*60}\n")
+        
+        return training_response
         
     except HTTPException:
         raise

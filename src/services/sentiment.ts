@@ -62,10 +62,13 @@ export async function performSentimentAnalysis(
   
   keywordScore = Math.max(0, Math.min(100, keywordScore))
   
-  // GPT-4oによる高度な分析（GPT-5相当の最新モデル）
+  // GPT-5による高度な分析（最新の Responses API）
   if (apiKey) {
     try {
-      const openai = new OpenAI({ apiKey })
+      const openai = new OpenAI({ 
+        apiKey,
+        organization: 'org-C3x5ZVIvaiCoQSoLIKqg9X5E'
+      })
       
       const newsText = news.slice(0, 10).map(n => 
         `[${n.source}] ${n.headline}\n${n.summary}`
@@ -94,27 +97,18 @@ JSON形式で回答してください：
 }
 `
       
-      // Use GPT-4o (最新の優れたモデル - GPT-5相当)
-      const response = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-          {
-            role: 'system',
-            content: '金融市場の専門アナリストとしてニュース分析を行います。客観的かつ正確な評価を提供します。'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        response_format: { type: 'json_object' },
-        temperature: 0.7,
-        max_tokens: 1000
+      // Use GPT-5 Responses API (最新の高性能モデル)
+      const response = await openai.responses.create({
+        model: 'gpt-5',
+        input: prompt,
+        temperature: 0.7
       })
       
-      const gptAnalysis = JSON.parse(response.choices[0].message.content || '{}')
+      // レスポンスからJSON部分を抽出
+      const responseText = response.output?.[0]?.content?.[0]?.text || '{}'
+      const gptAnalysis = JSON.parse(responseText)
       
-      // GPT-4oのスコアとキーワードスコアを統合（GPT-4oに70%の重み）
+      // GPT-5のスコアとキーワードスコアを統合（GPT-5に70%の重み）
       const finalScore = (gptAnalysis.score * 0.7) + (keywordScore * 0.3)
       
       // ニュース記事を個別に分類

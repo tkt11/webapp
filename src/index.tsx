@@ -2077,13 +2077,13 @@ app.get('/', (c) => {
                   <div class="bg-blue-50 p-3 rounded text-center">
                     <p class="text-xs text-gray-600 mb-1">RMSE（誤差）</p>
                     <p class="text-xl font-bold text-blue-600">
-                      $\${data.prediction.ml_training.backfit_predictions.rmse.toFixed(2)}
+                      \${data.prediction.ml_training.backfit_predictions.rmse.toFixed(2)}
                     </p>
                   </div>
                   <div class="bg-green-50 p-3 rounded text-center">
                     <p class="text-xs text-gray-600 mb-1">MAE（平均誤差）</p>
                     <p class="text-xl font-bold text-green-600">
-                      $\${data.prediction.ml_training.backfit_predictions.mae.toFixed(2)}
+                      \${data.prediction.ml_training.backfit_predictions.mae.toFixed(2)}
                     </p>
                   </div>
                   <div class="bg-purple-50 p-3 rounded text-center">
