@@ -7,7 +7,6 @@
 import { NASDAQ_100_SYMBOLS } from './symbols'
 import { cache, CACHE_TTL, generateCacheKey } from './cache'
 import { lightweightScreening } from './ranking'
-import { generateGPT5FinalJudgment } from './prediction'
 import { HighGrowthScore, RankingResponse, LightAnalysis } from '../types'
 
 /**
@@ -118,48 +117,113 @@ async function analyzeWithGPT5Mini(
   }
 ): Promise<HighGrowthScore | null> {
   try {
-    // ここでは既存のanalyzeStock関数を簡易的に呼び出す
-    // 完全な実装は既存のprediction.tsの関数を利用
-    
-    // 簡易版: 統計予測のみ（GPT-5-miniは後で統合）
-    const predictedGain = await estimatePredictedGain(
-      candidate.symbol,
-      timeframe,
-      apiKeys.alphaVantage
-    )
-    
-    if (predictedGain === null || predictedGain < 15) {
-      return null  // 15%未満の上昇予測は除外
+    // キャッシュキー
+    const cacheKey = generateCacheKey('gpt5mini_analysis', candidate.symbol, timeframe)
+    const cached = cache.get<HighGrowthScore>(cacheKey)
+    if (cached) {
+      console.log(`Cache hit for GPT-5-mini analysis: ${candidate.symbol}`)
+      return cached
     }
     
-    // 予測価格計算
-    const predictedPrice = candidate.currentPrice * (1 + predictedGain / 100)
+    console.log(`Calling GPT-5-mini for ${candidate.symbol}...`)
     
-    // 信頼度（簡易版）
-    const confidence = Math.min(
-      70 + candidate.fundamentalScore * 0.2 + candidate.technicalScore * 0.1,
-      95
-    )
+    // OpenAI クライアント初期化
+    const { default: OpenAI } = await import('openai')
+    const openai = new OpenAI({
+      apiKey: apiKeys.openai
+    })
     
-    // 総合スコア
+    // 追加データ取得：ニュース、ファンダメンタル
+    const [newsData, fundamentalData] = await Promise.all([
+      fetchNewsData(candidate.symbol, apiKeys.alphaVantage),
+      fetchFundamentalData(candidate.symbol, apiKeys.finnhub)
+    ])
+    
+    // GPT-5-miniへのプロンプト構築
+    const prompt = `あなたは株式アナリストです。以下の銘柄データを分析し、${timeframe}後の成長可能性を評価してください。
+
+【銘柄】${candidate.symbol}
+【現在価格】$${candidate.currentPrice}
+【テクニカルスコア】${candidate.technicalScore}/100
+【ファンダメンタルスコア】${candidate.fundamentalScore}/100
+【センチメントスコア】${candidate.sentimentScore}/100
+
+【最新ニュース】
+${newsData.slice(0, 5).map((n: any) => `- ${n.headline}: ${n.summary}`).join('\n')}
+
+【財務指標】
+${fundamentalData ? JSON.stringify(fundamentalData, null, 2) : '取得失敗'}
+
+【分析要求】
+1. ${timeframe}後の予測価格を算出
+2. 予測上昇率（%）を計算
+3. 信頼度（60-95%）を評価
+4. 総合判断理由を簡潔に述べる
+
+【出力形式】JSON形式で以下を返してください：
+{
+  "predictedPrice": 数値,
+  "predictedGain": 数値（%）,
+  "confidence": 数値（60-95）,
+  "reasoning": "判断理由（100文字以内）"
+}
+
+注意：predictedGainが15%未満の場合、その銘柄は推奨しません。`
+
+    // GPT-5-mini API呼び出し
+    const response = await openai.responses.create({
+      model: 'gpt-5-mini',
+      input: prompt
+    })
+    
+    // レスポンス解析
+    const responseText = response.output_text || ''
+    console.log(`GPT-5-mini response for ${candidate.symbol}:`, responseText.substring(0, 200))
+    
+    // JSON抽出
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) {
+      console.error(`Failed to parse GPT-5-mini response for ${candidate.symbol}`)
+      return null
+    }
+    
+    const gpt5Result = JSON.parse(jsonMatch[0])
+    
+    // 予測上昇率が15%未満は除外
+    if (gpt5Result.predictedGain < 15) {
+      console.log(`${candidate.symbol}: predictedGain ${gpt5Result.predictedGain}% < 15%, skipping`)
+      return null
+    }
+    
+    // 信頼度の範囲チェック
+    const confidence = Math.max(60, Math.min(95, gpt5Result.confidence))
+    
+    // 総合スコア計算
     const totalScore = (
-      predictedGain * 0.35 +
+      gpt5Result.predictedGain * 0.35 +
       confidence * 0.30 +
       candidate.fundamentalScore * 0.20 +
       candidate.technicalScore * 0.15
     )
     
-    return {
+    const result: HighGrowthScore = {
       symbol: candidate.symbol,
       currentPrice: candidate.currentPrice,
-      predictedPrice,
-      predictedGain,
+      predictedPrice: gpt5Result.predictedPrice,
+      predictedGain: gpt5Result.predictedGain,
       confidence,
       fundamentalScore: candidate.fundamentalScore,
       technicalScore: candidate.technicalScore,
       totalScore,
       timeframe
     }
+    
+    // キャッシュに保存
+    cache.set(cacheKey, result, CACHE_TTL.GPT5_ANALYSIS)
+    
+    console.log(`GPT-5-mini analysis completed for ${candidate.symbol}: gain=${gpt5Result.predictedGain}%, confidence=${confidence}%`)
+    
+    return result
   } catch (error) {
     console.error(`Error in GPT-5-mini analysis for ${candidate.symbol}:`, error)
     return null
@@ -167,56 +231,65 @@ async function analyzeWithGPT5Mini(
 }
 
 /**
- * 予測上昇率の推定（簡易版）
+ * ニュースデータ取得
  */
-async function estimatePredictedGain(
-  symbol: string,
-  timeframe: '30d' | '60d' | '90d',
-  apiKey: string
-): Promise<number | null> {
+async function fetchNewsData(symbol: string, apiKey: string): Promise<any[]> {
   try {
-    const cacheKey = generateCacheKey('predicted_gain', symbol, timeframe)
-    const cached = cache.get<number>(cacheKey)
-    if (cached !== null) {
+    const cacheKey = generateCacheKey('news', symbol)
+    const cached = cache.get<any[]>(cacheKey)
+    if (cached) {
       return cached
     }
     
-    // 過去30日のデータで線形回帰
     const response = await fetch(
-      `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&apikey=${apiKey}&outputsize=compact`
+      `https://www.alphavantage.co/query?function=NEWS_SENTIMENT&tickers=${symbol}&apikey=${apiKey}&limit=10`
     )
     const data = await response.json()
     
-    if (!data['Time Series (Daily)']) {
+    const news = data.feed || []
+    cache.set(cacheKey, news, CACHE_TTL.NEWS)
+    
+    return news
+  } catch (error) {
+    console.error(`Error fetching news for ${symbol}:`, error)
+    return []
+  }
+}
+
+/**
+ * ファンダメンタルデータ取得
+ */
+async function fetchFundamentalData(symbol: string, apiKey: string): Promise<any | null> {
+  try {
+    const cacheKey = generateCacheKey('fundamental', symbol)
+    const cached = cache.get<any>(cacheKey)
+    if (cached) {
+      return cached
+    }
+    
+    const response = await fetch(
+      `https://finnhub.io/api/v1/stock/metric?symbol=${symbol}&metric=all&token=${apiKey}`
+    )
+    const data = await response.json()
+    
+    if (!data.metric) {
       return null
     }
     
-    const prices = Object.values(data['Time Series (Daily)'])
-      .slice(0, 30)
-      .map((day: any) => parseFloat(day['4. close']))
-      .reverse()
+    // 重要な指標のみ抽出
+    const fundamentals = {
+      peRatio: data.metric.peNormalizedAnnual,
+      pbRatio: data.metric.pbAnnual,
+      roe: data.metric.roeTTM,
+      revenueGrowth: data.metric.revenueGrowthTTMYoy,
+      operatingMargin: data.metric.operatingMarginTTM
+    }
     
-    // 線形回帰
-    const n = prices.length
-    const sumX = (n * (n - 1)) / 2
-    const sumY = prices.reduce((a, b) => a + b, 0)
-    const sumXY = prices.reduce((sum, price, idx) => sum + (idx * price), 0)
-    const sumX2 = (n * (n - 1) * (2 * n - 1)) / 6
+    cache.set(cacheKey, fundamentals, CACHE_TTL.FUNDAMENTAL)
     
-    const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX)
-    
-    // 予測
-    const days = timeframe === '30d' ? 30 : timeframe === '60d' ? 60 : 90
-    const currentPrice = prices[prices.length - 1]
-    const predictedPrice = currentPrice + (slope * days)
-    const gain = ((predictedPrice - currentPrice) / currentPrice) * 100
-    
-    // キャッシュに保存
-    cache.set(cacheKey, gain, CACHE_TTL.LIGHT_ANALYSIS)
-    
-    return gain
+    return fundamentals
   } catch (error) {
-    console.error(`Error estimating predicted gain for ${symbol}:`, error)
+    console.error(`Error fetching fundamental data for ${symbol}:`, error)
     return null
   }
 }
