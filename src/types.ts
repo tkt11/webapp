@@ -290,3 +290,71 @@ export interface Env {
   FRED_API_KEY: string
   OPENAI_API_KEY: string
 }
+
+// ランキング関連の型定義
+
+export interface LightAnalysis {
+  symbol: string
+  technicalScore: number
+  fundamentalScore: number
+  sentimentScore: number
+  preliminaryScore: number
+  currentPrice: number
+  predictedGain?: number
+}
+
+export interface HighGrowthScore {
+  symbol: string
+  currentPrice: number
+  predictedPrice: number
+  predictedGain: number
+  confidence: number
+  fundamentalScore: number
+  technicalScore: number
+  totalScore: number
+  timeframe: '30d' | '60d' | '90d'
+}
+
+export interface ShortTermScore {
+  symbol: string
+  currentPrice: number
+  technicalSignal: number
+  volatility: number
+  momentum: number
+  volumeRatio: number
+  entryTiming: 'NOW' | 'WAIT' | 'AVOID'
+  totalScore: number
+}
+
+export interface TrendingScore {
+  symbol: string
+  currentPrice: number
+  newsScore: number
+  socialScore: number
+  searchScore: number
+  analystScore: number
+  fundamentalGrowth: number
+  totalScore: number
+  trendReason: string
+}
+
+export interface RecommendedScore {
+  symbol: string
+  currentPrice: number
+  technicalScore: number
+  fundamentalScore: number
+  sentimentScore: number
+  predictionConfidence: number
+  totalScore: number
+  action: 'BUY' | 'SELL' | 'HOLD'
+}
+
+export interface RankingResponse<T> {
+  rankings: T[]
+  metadata: {
+    totalScanned: number
+    timestamp: string
+    cacheHit: boolean
+    executionTime: number
+  }
+}

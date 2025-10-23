@@ -575,7 +575,8 @@ export async function generateGPT5FinalJudgment(
   try {
     const openai = new OpenAI({ 
       apiKey,
-      organization: 'org-C3x5ZVIvaiCoQSoLIKqg9X5E'
+      organization: 'org-C3x5ZVIvaiCoQSoLIKqg9X5E',
+      timeout: 300000 // 300秒（5分）タイムアウト - GPT-5 + Code Interpreterは実際に167-247秒かかるため
     })
     
     // ===== 高度な統計計算を実行 =====
@@ -928,36 +929,56 @@ ${prediction.risks.map(r => '- ' + r).join('\n')}
   ]
 }
 
-【重要な分析指示】
-1. **上記の統計計算結果を参考にしてください**：
-   - price_predictionsは、統計ベースの予測値を参考に、あなたの判断で調整してください
-   - 計算されたボラティリティ（${statisticalAnalysis.basic_stats.volatility}）を考慮してください
-   - トレンド強度（${statisticalAnalysis.trend.trend_strength}）が高い場合、予測の信頼度を上げてください
+【重要な分析指示 - 必ず遵守してください】
 
-2. **price_predictionsの出力方法**：
-   - 統計計算の予測値を参考にしつつ、ファンダメンタル、センチメント、マクロ環境を加味して調整
-   - 信頼度は期間が長いほど低下させる（短期50-70%、中期40-50%）
-   - **統計計算値からの乖離がある場合、その理由を推論に含めてください**
+**【超重要】price_predictions と optimal_timing の整合性を保つこと**
 
-3. **optimal_timingの設定**：
-   - エントリー: 統計計算の推奨範囲（$${statisticalAnalysis.optimal_levels.entry_low}-$${statisticalAnalysis.optimal_levels.entry_high}）を参考に
-   - エグジット: 統計目標（$${statisticalAnalysis.optimal_levels.exit_target}付近）を参考に、30-90日後の日付を設定
-   - ストップロス: 統計計算の$${statisticalAnalysis.optimal_levels.stop_loss}付近を参考に
-   - 日付は今日（2025-10-21）を起点に計算してください
+1. **price_predictionsの出力ルール（必須）**：
+   - **必ず統計計算の予測値をベースにしてください**
+   - 統計予測値:
+     * 3日後: $${statisticalAnalysis.calculated_predictions.day_3.price.toFixed(2)}
+     * 7日後: $${statisticalAnalysis.calculated_predictions.day_7.price.toFixed(2)}
+     * 14日後: $${statisticalAnalysis.calculated_predictions.day_14.price.toFixed(2)}
+     * 30日後: $${statisticalAnalysis.calculated_predictions.day_30.price.toFixed(2)}
+     * 60日後: $${statisticalAnalysis.calculated_predictions.day_60.price.toFixed(2)}
+     * 90日後: $${statisticalAnalysis.calculated_predictions.day_90.price.toFixed(2)}
+   
+   - **上記の値から±10%以内で調整してください**（大幅な変更は禁止）
+   - ファンダメンタル・センチメントが非常に強い/弱い場合のみ±15%まで許容
+   - 調整理由は必ずreasoningに記載すること
 
-4. **scenario_analysisの設定**：
-   - ベストケース: 統計値$${statisticalAnalysis.scenario_targets.best_case_90d}付近を参考に（確率20-30%）
-   - ベースケース: 統計値$${statisticalAnalysis.scenario_targets.base_case_90d}付近を参考に（確率50-60%）
-   - ワーストケース: 統計値$${statisticalAnalysis.scenario_targets.worst_case_90d}付近を参考に（確率15-25%）
-   - **確率の合計は必ず100%にしてください**
-   - 各シナリオの前提条件を3つずつ挙げてください
+2. **optimal_timingの設定ルール（必須）**：
+   - **エントリー価格は必ず現在価格（$${currentPrice.toFixed(2)}）の±5%以内**
+     * min: $${(currentPrice * 0.95).toFixed(2)} 付近
+     * max: $${(currentPrice * 1.05).toFixed(2)} 付近
+   
+   - **エグジット価格はprice_predictionsの30-90日後の予測価格と一致させること**
+     * あなたが予測した60日後の価格を中心に±5%の範囲を設定
+     * 例: 60日後予測が$300なら、exit.price_range = {min: 285, max: 315}
+   
+   - **ストップロスは現在価格の-8%〜-12%を推奨**
+     * price: $${(currentPrice * 0.90).toFixed(2)} 付近
+   
+   - **日付計算**: 今日は2025-10-21。エントリーは即日〜7日以内、エグジットは30-90日後
 
-5. **portfolio_allocationの設定**：
-   - ボラティリティ${statisticalAnalysis.basic_stats.volatility}とトレンド強度${statisticalAnalysis.trend.trend_strength}を考慮
-   - 高ボラティリティの場合は保守的配分を低めに
-   - 強いトレンドの場合は積極的配分を高めに
+3. **scenario_analysisの設定ルール（必須）**：
+   - **ベースケースは必ず統計計算のbase_case_90d（$${statisticalAnalysis.scenario_targets.base_case_90d}）付近に設定**
+   - ベストケース: ベースケースの+20%〜+30%
+   - ワーストケース: ベースケースの-20%〜-30%
+   - **確率の合計は必ず100%**: ベスト20-30%, ベース50-60%, ワースト15-25%
 
-6. **upcoming_eventsは${symbol}の実際の決算日やイベントを推測して含めてください**（四半期決算は通常3ヶ月ごと）
+4. **portfolio_allocationの設定**：
+   - ボラティリティ${statisticalAnalysis.basic_stats.volatility}を重視
+   - 高ボラティリティ(>30%): conservative 5-10%, moderate 15-25%, aggressive 25-35%
+   - 中ボラティリティ(15-30%): conservative 10-20%, moderate 25-35%, aggressive 30-40%
+   - 低ボラティリティ(<15%): conservative 15-25%, moderate 30-40%, aggressive 35-50%
+
+5. **upcoming_eventsは${symbol}の実際の決算日を推測**（四半期決算は通常3ヶ月ごと）
+
+**【データの一貫性チェック】**
+- price_predictions.mid_term.day_60.price と optimal_timing.exit.price_range が大きく乖離していないか確認
+- scenario_analysis.base_case.price_target と price_predictions.mid_term.day_90.price が近い値か確認
+- これらが大きく異なる場合、計算をやり直してください
 
 【Pythonによる高度な計算の実行指示】
 以下の計算をPythonで実行して、より高度な分析を行ってください：
@@ -989,18 +1010,36 @@ ${prediction.risks.map(r => '- ' + r).join('\n')}
     
     // GPT-5 Responses APIを使用（Code Interpreter有効化）
     console.log('Calling GPT-5 with Code Interpreter enabled...')
-    const response = await openai.responses.create({
-      model: 'gpt-5',
-      input: comprehensiveData,
-      // Code Interpreterを有効化
-      tools: [
-        {
-          type: 'code_interpreter',
-          container: { type: 'auto' }
-        }
-      ],
-      tool_choice: 'auto'
+    console.log('Statistical predictions for reference:', {
+      day_3: statisticalAnalysis.calculated_predictions.day_3.price,
+      day_7: statisticalAnalysis.calculated_predictions.day_7.price,
+      day_14: statisticalAnalysis.calculated_predictions.day_14.price,
+      day_30: statisticalAnalysis.calculated_predictions.day_30.price,
+      day_60: statisticalAnalysis.calculated_predictions.day_60.price,
+      day_90: statisticalAnalysis.calculated_predictions.day_90.price
     })
+    
+    // タイムアウト用のPromise（300秒 = 5分）
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('GPT-5 API request timeout after 300 seconds')), 300000)
+    })
+    
+    // APIリクエストとタイムアウトを競争させる
+    const response = await Promise.race([
+      openai.responses.create({
+        model: 'gpt-5',
+        input: comprehensiveData,
+        // Code Interpreterを有効化
+        tools: [
+          {
+            type: 'code_interpreter',
+            container: { type: 'auto' }
+          }
+        ],
+        tool_choice: 'auto'
+      }),
+      timeoutPromise
+    ]) as any
     
     // レスポンスからJSON部分を抽出
     const responseText = response.output_text || response.output?.[0]?.content?.[0]?.text || '{}'
@@ -1045,6 +1084,17 @@ ${prediction.risks.map(r => '- ' + r).join('\n')}
   } catch (error) {
     console.error('GPT-5最終判断生成エラー:', error)
     console.error('Error details:', error instanceof Error ? error.message : String(error))
+    
+    // タイムアウトの場合は特別にログ出力
+    if (error instanceof Error && error.message.includes('timeout')) {
+      console.error('⏱️  GPT-5 APIがタイムアウトしました（300秒以上）。これは以下の原因が考えられます:')
+      console.error('  1. Code Interpreterの処理が長時間実行されている')
+      console.error('  2. OpenAI APIサーバーの応答が遅い')
+      console.error('  3. ネットワークの問題')
+      console.error('  → 通常の処理時間: 167-247秒（2分47秒～4分7秒）')
+      console.error('  → 対策: Code Interpreterを無効化するか、モデルをgpt-4-turboに切り替えてください')
+    }
+    
     return null
   }
 }

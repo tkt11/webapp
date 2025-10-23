@@ -337,6 +337,96 @@ app.post('/api/backtest', async (c) => {
   }
 })
 
+// ===== ランキングAPI =====
+
+// おすすめTOP10ランキング
+app.post('/api/rankings/recommended', async (c) => {
+  try {
+    const { env } = c
+    const { getRecommendedRanking } = await import('./services/ranking')
+    
+    const result = await getRecommendedRanking({
+      alphaVantage: env.ALPHA_VANTAGE_API_KEY,
+      finnhub: env.FINNHUB_API_KEY
+    })
+    
+    return c.json(result)
+  } catch (error: any) {
+    console.error('Recommended ranking error:', error)
+    return c.json({
+      error: 'おすすめランキングの取得に失敗しました',
+      details: error.message
+    }, 500)
+  }
+})
+
+// 高成長×信頼度ランキング
+app.post('/api/rankings/high-growth', async (c) => {
+  try {
+    const { env } = c
+    const { timeframe = '90d' } = await c.req.json()
+    
+    const { getHighGrowthRanking } = await import('./services/ranking-highgrowth')
+    
+    const result = await getHighGrowthRanking(timeframe, {
+      alphaVantage: env.ALPHA_VANTAGE_API_KEY,
+      finnhub: env.FINNHUB_API_KEY,
+      openai: env.OPENAI_API_KEY,
+      fred: env.FRED_API_KEY
+    })
+    
+    return c.json(result)
+  } catch (error: any) {
+    console.error('High-growth ranking error:', error)
+    return c.json({
+      error: '高成長ランキングの取得に失敗しました',
+      details: error.message
+    }, 500)
+  }
+})
+
+// 短期トレードランキング
+app.post('/api/rankings/short-term', async (c) => {
+  try {
+    const { env } = c
+    const { getShortTermRanking } = await import('./services/ranking-shortterm')
+    
+    const result = await getShortTermRanking({
+      alphaVantage: env.ALPHA_VANTAGE_API_KEY,
+      finnhub: env.FINNHUB_API_KEY
+    })
+    
+    return c.json(result)
+  } catch (error: any) {
+    console.error('Short-term ranking error:', error)
+    return c.json({
+      error: '短期トレードランキングの取得に失敗しました',
+      details: error.message
+    }, 500)
+  }
+})
+
+// 注目株ランキング
+app.post('/api/rankings/trending', async (c) => {
+  try {
+    const { env } = c
+    const { getTrendingRanking } = await import('./services/ranking-trending')
+    
+    const result = await getTrendingRanking({
+      alphaVantage: env.ALPHA_VANTAGE_API_KEY,
+      finnhub: env.FINNHUB_API_KEY
+    })
+    
+    return c.json(result)
+  } catch (error: any) {
+    console.error('Trending ranking error:', error)
+    return c.json({
+      error: '注目株ランキングの取得に失敗しました',
+      details: error.message
+    }, 500)
+  }
+})
+
 // メインページ
 app.get('/', (c) => {
   return c.html(`
@@ -461,6 +551,9 @@ app.get('/', (c) => {
         <button class="tab-button px-6 py-4 font-semibold" onclick="switchTab('recommendations')">
           <i class="fas fa-star mr-2"></i>おすすめ銘柄TOP10
         </button>
+        <button class="tab-button px-6 py-4 font-semibold" onclick="switchTab('rankings')">
+          <i class="fas fa-trophy mr-2"></i>ランキング
+        </button>
         <button class="tab-button px-6 py-4 font-semibold" onclick="switchTab('simulation')">
           <i class="fas fa-calculator mr-2"></i>投資シミュレーター
         </button>
@@ -553,7 +646,7 @@ app.get('/', (c) => {
 
       <div id="analysis-loading" style="display:none;">
         <div class="loader"></div>
-        <p class="text-center text-gray-600">分析中... GPT-5で詳細分析を実行しています</p>
+        <p class="text-center text-gray-600">分析中... GPT-5 + Code Interpreter分析を実行しています（約3-5分）</p>
       </div>
 
       <div id="analysis-result" style="display:none;">
@@ -725,6 +818,58 @@ app.get('/', (c) => {
     <div class="modal-content">
       <div id="modal-body">
         <!-- モーダルの内容はJavaScriptで動的に挿入 -->
+      </div>
+    </div>
+
+    <!-- ランキングタブ -->
+    <div id="rankings-tab" class="tab-content">
+      <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+        <h2 class="text-2xl font-bold mb-4">
+          <i class="fas fa-trophy mr-2 text-yellow-600"></i>
+          NASDAQ-100 ランキング
+        </h2>
+        <p class="text-gray-600 mb-6">
+          NASDAQ-100銘柄を複数の視点でランキング
+        </p>
+        
+        <!-- ランキングタイプ選択 -->
+        <div class="grid grid-cols-4 gap-4 mb-6">
+          <button onclick="loadRanking('recommended')" class="ranking-type-btn bg-blue-500 text-white px-6 py-3 rounded-lg hover:bg-blue-600">
+            <i class="fas fa-star mr-2"></i>
+            おすすめTOP10
+          </button>
+          <button onclick="loadRanking('high-growth')" class="ranking-type-btn bg-green-500 text-white px-6 py-3 rounded-lg hover:bg-green-600">
+            <i class="fas fa-chart-line mr-2"></i>
+            高成長×信頼度
+          </button>
+          <button onclick="loadRanking('short-term')" class="ranking-type-btn bg-orange-500 text-white px-6 py-3 rounded-lg hover:bg-orange-600">
+            <i class="fas fa-bolt mr-2"></i>
+            短期トレード
+          </button>
+          <button onclick="loadRanking('trending')" class="ranking-type-btn bg-purple-500 text-white px-6 py-3 rounded-lg hover:bg-purple-600">
+            <i class="fas fa-fire mr-2"></i>
+            注目株
+          </button>
+        </div>
+        
+        <!-- 期間選択（高成長ランキング用） -->
+        <div id="timeframe-selector" style="display:none;" class="mb-6">
+          <label class="block text-sm font-semibold mb-2">予測期間</label>
+          <select id="ranking-timeframe" class="px-4 py-2 border rounded-lg">
+            <option value="30d">30日後</option>
+            <option value="60d">60日後</option>
+            <option value="90d" selected>90日後</option>
+          </select>
+        </div>
+      </div>
+      
+      <div id="rankings-loading" style="display:none;">
+        <div class="loader"></div>
+        <p class="text-center text-gray-600">ランキング計算中... NASDAQ-100銘柄を分析しています（約1-5分）</p>
+      </div>
+      
+      <div id="rankings-result" style="display:none;">
+        <!-- 結果はJavaScriptで動的に挿入 -->
       </div>
     </div>
   </div>
@@ -1199,11 +1344,11 @@ app.get('/', (c) => {
 
       // 動的ローディングメッセージ
       const loadingDiv = document.getElementById('analysis-loading')
-      let loadingMessage = '分析中... GPT-5で詳細分析を実行しています'
+      let loadingMessage = '分析中... GPT-5 + Code Interpreter分析を実行しています（約3-5分）'
       if (trainModel && enableBackfit) {
-        loadingMessage = '分析中... モデル学習 + バックフィット検証を実行しています（約15-40秒）'
+        loadingMessage = '分析中... モデル学習 + バックフィット検証 + GPT-5分析を実行しています（約3-5分）'
       } else if (trainModel) {
-        loadingMessage = '分析中... モデル学習を実行しています（約10-30秒）'
+        loadingMessage = '分析中... モデル学習 + GPT-5分析を実行しています（約3-5分）'
       }
       
       loadingDiv.innerHTML = \`
@@ -2591,6 +2736,40 @@ app.get('/', (c) => {
                 </div>
               </div>
               
+              <!-- 計算ロジックの説明 -->
+              <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
+                <h5 class="font-bold mb-2"><i class="fas fa-info-circle mr-2"></i>GPT-5の分析プロセス</h5>
+                <div class="text-sm space-y-2">
+                  <p><strong>【ステップ1】サーバー側で基本統計を計算</strong></p>
+                  <ul class="ml-4 text-xs space-y-1 opacity-90">
+                    <li>• 過去30日の価格データから線形回帰による価格予測</li>
+                    <li>• ボラティリティ、トレンド強度（R²値）、移動平均を計算</li>
+                    <li>• 3日、7日、14日、30日、60日、90日後の統計的予測価格を算出</li>
+                  </ul>
+                  
+                  <p class="mt-2"><strong>【ステップ2】GPT-5がCode Interpreterで高度計算</strong></p>
+                  <ul class="ml-4 text-xs space-y-1 opacity-90">
+                    <li>• Pythonでモンテカルロシミュレーション（1000回）を実行</li>
+                    <li>• 年率ボラティリティ、シャープレシオ、最大ドローダウン、VaRを計算</li>
+                    <li>• 統計的予測値の信頼区間を算出</li>
+                  </ul>
+                  
+                  <p class="mt-2"><strong>【ステップ3】全データを統合して最終判断</strong></p>
+                  <ul class="ml-4 text-xs space-y-1 opacity-90">
+                    <li>• 統計予測 + Code Interpreter結果 + 5次元分析を総合評価</li>
+                    <li>• <span class="text-yellow-300 font-bold">価格予測は統計値から±10%以内で調整</span></li>
+                    <li>• <span class="text-yellow-300 font-bold">最適な売買タイミングは予測価格と整合性を保つ</span></li>
+                    <li>• ファンダメンタル・センチメントが強い場合のみ±15%まで調整</li>
+                  </ul>
+                  
+                  <p class="mt-2 bg-yellow-500 bg-opacity-20 p-2 rounded">
+                    <i class="fas fa-exclamation-triangle mr-1"></i>
+                    <strong>注意:</strong> GPT-5は確率的モデルのため、同じ入力でも実行ごとに若干異なる結果が出る場合があります。
+                    ただし、統計的な基準値を守るため、大幅な変動はありません。
+                  </p>
+                </div>
+              </div>
+              
               <!-- アクションと信頼度 -->
               <div class="grid grid-cols-2 gap-4 mb-6">
                 <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg">
@@ -2968,7 +3147,37 @@ app.get('/', (c) => {
                 </div>
               </div>
             </div>
-            \` : ''}
+            \` : \`
+            <!-- GPT-5分析が利用できない場合の表示 -->
+            <div class="bg-yellow-100 border-l-4 border-yellow-500 p-6 rounded-lg mb-6">
+              <div class="flex items-start">
+                <i class="fas fa-exclamation-triangle text-yellow-600 text-3xl mr-4 mt-1"></i>
+                <div>
+                  <h4 class="font-bold text-xl text-yellow-800 mb-2">GPT-5最終判断が利用できません</h4>
+                  <div class="text-sm text-yellow-700 space-y-2">
+                    <p><strong>考えられる原因:</strong></p>
+                    <ul class="list-disc ml-5 space-y-1">
+                      <li>GPT-5 APIの応答がタイムアウトしました（5分以上）</li>
+                      <li>Code Interpreterの処理に時間がかかりすぎています</li>
+                      <li>OpenAI APIサーバーの一時的な問題</li>
+                      <li>ネットワークの問題</li>
+                    </ul>
+                    <p class="mt-3 bg-blue-100 p-2 rounded">
+                      <i class="fas fa-info-circle mr-1"></i>
+                      <strong>通常の処理時間:</strong> GPT-5 + Code Interpreterは2分47秒～4分7秒かかります。
+                      タイムアウトを5分に設定していますが、それでも失敗する場合は再試行してください。
+                    </p>
+                    <p class="mt-3"><strong>対策:</strong></p>
+                    <ul class="list-disc ml-5 space-y-1">
+                      <li>しばらく待ってから再度お試しください</li>
+                      <li>統計モデルの予測結果（下記）は利用可能です</li>
+                      <li>問題が続く場合は、開発者ツール（F12）のコンソールログをご確認ください</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+            \`}
           </div>
 
           <div class="bg-white rounded-lg shadow-md p-6">
@@ -4324,6 +4533,347 @@ app.get('/', (c) => {
       } finally {
         document.getElementById('backtest-loading').style.display = 'none'
       }
+    }
+
+    // ===== ランキング機能 =====
+    
+    // ランキング読み込み
+    async function loadRanking(type) {
+      // すべてのランキングボタンをリセット
+      document.querySelectorAll('#rankings-tab button').forEach(btn => {
+        btn.classList.remove('bg-blue-600', 'text-white')
+        btn.classList.add('bg-white', 'text-gray-700')
+      })
+      
+      // 期間選択の表示/非表示
+      const timeframeSelector = document.getElementById('timeframe-selector')
+      if (type === 'high-growth') {
+        timeframeSelector.style.display = 'block'
+      } else {
+        timeframeSelector.style.display = 'none'
+      }
+      
+      // ローディング表示
+      document.getElementById('rankings-loading').style.display = 'block'
+      document.getElementById('rankings-result').style.display = 'none'
+      
+      // ローディングメッセージをランキングタイプに応じて変更
+      const loadingMessages = {
+        'recommended': 'おすすめTOP10を計算中... 統計モデルで100銘柄を分析しています（約1-2分）',
+        'high-growth': '高成長×信頼度ランキングを計算中... 2段階スクリーニング + GPT-5-mini分析を実行中（約3-5分）',
+        'short-term': '短期トレードランキングを計算中... テクニカル指標を分析しています（約1-2分）',
+        'trending': '注目株ランキングを計算中... ニュース・センチメントを分析しています（約2-3分）'
+      }
+      
+      document.querySelector('#rankings-loading p').textContent = loadingMessages[type] || 'ランキング計算中...'
+      
+      try {
+        let endpoint = ''
+        let requestBody = {}
+        
+        switch(type) {
+          case 'recommended':
+            endpoint = '/api/rankings/recommended'
+            break
+          case 'high-growth':
+            endpoint = '/api/rankings/high-growth'
+            requestBody = { timeframe: document.getElementById('ranking-timeframe').value }
+            break
+          case 'short-term':
+            endpoint = '/api/rankings/short-term'
+            break
+          case 'trending':
+            endpoint = '/api/rankings/trending'
+            break
+        }
+        
+        const response = await axios.post(endpoint, requestBody)
+        const data = response.data
+        
+        // 結果を表示
+        displayRankingResults(type, data)
+        
+      } catch (error) {
+        const errorMsg = error.response?.data?.error || error.message
+        document.getElementById('rankings-result').innerHTML = \`
+          <div class="bg-red-50 border-l-4 border-red-500 p-6 rounded">
+            <p class="text-red-700">
+              <i class="fas fa-exclamation-triangle mr-2"></i>
+              エラーが発生しました: \${errorMsg}
+            </p>
+          </div>
+        \`
+        document.getElementById('rankings-result').style.display = 'block'
+      } finally {
+        document.getElementById('rankings-loading').style.display = 'none'
+      }
+    }
+    
+    // ランキング結果表示
+    function displayRankingResults(type, data) {
+      const resultsDiv = document.getElementById('rankings-result')
+      
+      const typeLabels = {
+        'recommended': 'おすすめTOP10',
+        'high-growth': '高成長×信頼度',
+        'short-term': '短期トレード',
+        'trending': '注目株'
+      }
+      
+      let html = \`
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="text-2xl font-bold">
+              <i class="fas fa-trophy mr-2 text-yellow-600"></i>
+              \${typeLabels[type]}ランキング
+            </h3>
+            <div class="text-sm text-gray-600">
+              <i class="fas fa-clock mr-1"></i>
+              更新: \${new Date(data.metadata.timestamp).toLocaleString('ja-JP')}
+              \${data.metadata.cacheHit ? '<span class="ml-2 px-2 py-1 bg-green-100 text-green-800 rounded text-xs">キャッシュ</span>' : ''}
+            </div>
+          </div>
+          
+          <div class="mb-4 text-sm text-gray-600">
+            <i class="fas fa-info-circle mr-1"></i>
+            分析銘柄数: \${data.metadata.totalScanned}銘柄 | 
+            実行時間: \${(data.metadata.executionTime / 1000).toFixed(1)}秒
+          </div>
+      \`
+      
+      // ランキングタイプごとに異なる表示
+      if (type === 'recommended') {
+        html += displayRecommendedRanking(data.rankings)
+      } else if (type === 'high-growth') {
+        html += displayHighGrowthRanking(data.rankings)
+      } else if (type === 'short-term') {
+        html += displayShortTermRanking(data.rankings)
+      } else if (type === 'trending') {
+        html += displayTrendingRanking(data.rankings)
+      }
+      
+      html += '</div>'
+      
+      resultsDiv.innerHTML = html
+      resultsDiv.style.display = 'block'
+    }
+    
+    // おすすめTOP10表示
+    function displayRecommendedRanking(rankings) {
+      return \`
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <thead class="bg-gradient-to-r from-blue-50 to-purple-50">
+              <tr>
+                <th class="px-4 py-3 text-left font-semibold">順位</th>
+                <th class="px-4 py-3 text-left font-semibold">銘柄</th>
+                <th class="px-4 py-3 text-right font-semibold">総合スコア</th>
+                <th class="px-4 py-3 text-right font-semibold">テクニカル</th>
+                <th class="px-4 py-3 text-right font-semibold">ファンダメンタル</th>
+                <th class="px-4 py-3 text-right font-semibold">センチメント</th>
+                <th class="px-4 py-3 text-right font-semibold">現在価格</th>
+                <th class="px-4 py-3 text-center font-semibold">判定</th>
+                <th class="px-4 py-3 text-center font-semibold">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              \${rankings.map((rank, index) => \`
+                <tr class="border-t hover:bg-gray-50 transition">
+                  <td class="px-4 py-4">
+                    <span class="inline-flex items-center justify-center w-8 h-8 rounded-full \${index < 3 ? 'bg-yellow-400 text-white' : 'bg-gray-200 text-gray-700'} font-bold">
+                      \${index + 1}
+                    </span>
+                  </td>
+                  <td class="px-4 py-4 font-bold text-lg">\${rank.symbol}</td>
+                  <td class="px-4 py-4 text-right">
+                    <span class="text-2xl font-bold text-blue-600">\${rank.totalScore}</span>
+                  </td>
+                  <td class="px-4 py-4 text-right text-blue-600 font-semibold">\${rank.technicalScore}</td>
+                  <td class="px-4 py-4 text-right text-green-600 font-semibold">\${rank.fundamentalScore}</td>
+                  <td class="px-4 py-4 text-right text-yellow-600 font-semibold">\${rank.sentimentScore}</td>
+                  <td class="px-4 py-4 text-right font-semibold">$\${rank.currentPrice.toFixed(2)}</td>
+                  <td class="px-4 py-4 text-center">
+                    <span class="px-3 py-1 rounded-full text-sm font-bold \${rank.action === 'BUY' ? 'bg-green-100 text-green-800' : rank.action === 'SELL' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}">
+                      \${rank.action}
+                    </span>
+                  </td>
+                  <td class="px-4 py-4 text-center">
+                    <button onclick="analyzeStockFromRanking('\${rank.symbol}')" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm">
+                      <i class="fas fa-chart-line mr-1"></i>詳細分析
+                    </button>
+                  </td>
+                </tr>
+              \`).join('')}
+            </tbody>
+          </table>
+        </div>
+      \`
+    }
+    
+    // 高成長×信頼度ランキング表示
+    function displayHighGrowthRanking(rankings) {
+      return \`
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <thead class="bg-gradient-to-r from-green-50 to-blue-50">
+              <tr>
+                <th class="px-4 py-3 text-left font-semibold">順位</th>
+                <th class="px-4 py-3 text-left font-semibold">銘柄</th>
+                <th class="px-4 py-3 text-right font-semibold">総合スコア</th>
+                <th class="px-4 py-3 text-right font-semibold">現在価格</th>
+                <th class="px-4 py-3 text-right font-semibold">予測価格</th>
+                <th class="px-4 py-3 text-right font-semibold">予測上昇率</th>
+                <th class="px-4 py-3 text-right font-semibold">信頼度</th>
+                <th class="px-4 py-3 text-right font-semibold">期間</th>
+                <th class="px-4 py-3 text-center font-semibold">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              \${rankings.map((rank, index) => \`
+                <tr class="border-t hover:bg-gray-50 transition">
+                  <td class="px-4 py-4">
+                    <span class="inline-flex items-center justify-center w-8 h-8 rounded-full \${index < 3 ? 'bg-yellow-400 text-white' : 'bg-gray-200 text-gray-700'} font-bold">
+                      \${index + 1}
+                    </span>
+                  </td>
+                  <td class="px-4 py-4 font-bold text-lg">\${rank.symbol}</td>
+                  <td class="px-4 py-4 text-right">
+                    <span class="text-2xl font-bold text-green-600">\${rank.totalScore}</span>
+                  </td>
+                  <td class="px-4 py-4 text-right font-semibold">$\${rank.currentPrice.toFixed(2)}</td>
+                  <td class="px-4 py-4 text-right font-semibold text-blue-600">$\${rank.predictedPrice.toFixed(2)}</td>
+                  <td class="px-4 py-4 text-right">
+                    <span class="text-xl font-bold text-green-600">+\${rank.predictedGain.toFixed(1)}%</span>
+                  </td>
+                  <td class="px-4 py-4 text-right">
+                    <span class="font-semibold text-purple-600">\${rank.confidence}%</span>
+                  </td>
+                  <td class="px-4 py-4 text-right text-gray-600">\${rank.timeframe}</td>
+                  <td class="px-4 py-4 text-center">
+                    <button onclick="analyzeStockFromRanking('\${rank.symbol}')" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm">
+                      <i class="fas fa-chart-line mr-1"></i>詳細分析
+                    </button>
+                  </td>
+                </tr>
+              \`).join('')}
+            </tbody>
+          </table>
+        </div>
+      \`
+    }
+    
+    // 短期トレードランキング表示
+    function displayShortTermRanking(rankings) {
+      return \`
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <thead class="bg-gradient-to-r from-yellow-50 to-orange-50">
+              <tr>
+                <th class="px-4 py-3 text-left font-semibold">順位</th>
+                <th class="px-4 py-3 text-left font-semibold">銘柄</th>
+                <th class="px-4 py-3 text-right font-semibold">総合スコア</th>
+                <th class="px-4 py-3 text-right font-semibold">現在価格</th>
+                <th class="px-4 py-3 text-right font-semibold">テクニカルシグナル</th>
+                <th class="px-4 py-3 text-right font-semibold">ボラティリティ</th>
+                <th class="px-4 py-3 text-right font-semibold">モメンタム</th>
+                <th class="px-4 py-3 text-center font-semibold">エントリー</th>
+                <th class="px-4 py-3 text-center font-semibold">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              \${rankings.map((rank, index) => \`
+                <tr class="border-t hover:bg-gray-50 transition">
+                  <td class="px-4 py-4">
+                    <span class="inline-flex items-center justify-center w-8 h-8 rounded-full \${index < 3 ? 'bg-yellow-400 text-white' : 'bg-gray-200 text-gray-700'} font-bold">
+                      \${index + 1}
+                    </span>
+                  </td>
+                  <td class="px-4 py-4 font-bold text-lg">\${rank.symbol}</td>
+                  <td class="px-4 py-4 text-right">
+                    <span class="text-2xl font-bold text-orange-600">\${rank.totalScore}</span>
+                  </td>
+                  <td class="px-4 py-4 text-right font-semibold">$\${rank.currentPrice.toFixed(2)}</td>
+                  <td class="px-4 py-4 text-right font-semibold text-blue-600">\${rank.technicalSignal}</td>
+                  <td class="px-4 py-4 text-right text-purple-600">\${rank.volatility.toFixed(1)}%</td>
+                  <td class="px-4 py-4 text-right text-green-600">\${rank.momentum.toFixed(1)}</td>
+                  <td class="px-4 py-4 text-center">
+                    <span class="px-3 py-1 rounded-full text-sm font-bold \${rank.entryTiming === 'NOW' ? 'bg-green-100 text-green-800' : rank.entryTiming === 'WAIT' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}">
+                      \${rank.entryTiming}
+                    </span>
+                  </td>
+                  <td class="px-4 py-4 text-center">
+                    <button onclick="analyzeStockFromRanking('\${rank.symbol}')" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm">
+                      <i class="fas fa-chart-line mr-1"></i>詳細分析
+                    </button>
+                  </td>
+                </tr>
+              \`).join('')}
+            </tbody>
+          </table>
+        </div>
+      \`
+    }
+    
+    // 注目株ランキング表示
+    function displayTrendingRanking(rankings) {
+      return \`
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <thead class="bg-gradient-to-r from-red-50 to-pink-50">
+              <tr>
+                <th class="px-4 py-3 text-left font-semibold">順位</th>
+                <th class="px-4 py-3 text-left font-semibold">銘柄</th>
+                <th class="px-4 py-3 text-right font-semibold">総合スコア</th>
+                <th class="px-4 py-3 text-right font-semibold">現在価格</th>
+                <th class="px-4 py-3 text-right font-semibold">ニュース</th>
+                <th class="px-4 py-3 text-right font-semibold">ソーシャル</th>
+                <th class="px-4 py-3 text-right font-semibold">アナリスト</th>
+                <th class="px-4 py-3 text-left font-semibold">注目理由</th>
+                <th class="px-4 py-3 text-center font-semibold">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              \${rankings.map((rank, index) => \`
+                <tr class="border-t hover:bg-gray-50 transition">
+                  <td class="px-4 py-4">
+                    <span class="inline-flex items-center justify-center w-8 h-8 rounded-full \${index < 3 ? 'bg-yellow-400 text-white' : 'bg-gray-200 text-gray-700'} font-bold">
+                      \${index + 1}
+                    </span>
+                  </td>
+                  <td class="px-4 py-4 font-bold text-lg">\${rank.symbol}</td>
+                  <td class="px-4 py-4 text-right">
+                    <span class="text-2xl font-bold text-red-600">\${rank.totalScore}</span>
+                  </td>
+                  <td class="px-4 py-4 text-right font-semibold">$\${rank.currentPrice.toFixed(2)}</td>
+                  <td class="px-4 py-4 text-right font-semibold text-blue-600">\${rank.newsScore}</td>
+                  <td class="px-4 py-4 text-right font-semibold text-purple-600">\${rank.socialScore}</td>
+                  <td class="px-4 py-4 text-right font-semibold text-green-600">\${rank.analystScore}</td>
+                  <td class="px-4 py-4 text-sm text-gray-700">\${rank.trendReason}</td>
+                  <td class="px-4 py-4 text-center">
+                    <button onclick="analyzeStockFromRanking('\${rank.symbol}')" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm">
+                      <i class="fas fa-chart-line mr-1"></i>詳細分析
+                    </button>
+                  </td>
+                </tr>
+              \`).join('')}
+            </tbody>
+          </table>
+        </div>
+      \`
+    }
+    
+    // ランキングから詳細分析へ遷移
+    function analyzeStockFromRanking(symbol) {
+      // 分析タブに切り替え
+      switchTab('analysis')
+      
+      // 銘柄コード入力欄にセット
+      document.getElementById('symbol-input').value = symbol
+      
+      // 1秒後に自動実行（タブ切り替えアニメーション完了を待つ）
+      setTimeout(() => {
+        analyzeStock()
+      }, 300)
     }
 
     // グローバルに分析データを保存（analyzeStock関数内で設定）
