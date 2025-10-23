@@ -7,6 +7,10 @@
  * 最終更新: 2025-10-23
  */
 
+// デモ用: 10銘柄に制限
+export const DEMO_MODE = true
+export const DEMO_SYMBOLS_LIMIT = 10
+
 export const NASDAQ_100_SYMBOLS = [
   // メガキャップテクノロジー
   'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'NVDA', 'META', 'TSLA',

@@ -4,7 +4,7 @@
  * NASDAQ-100銘柄のランキング機能を提供
  */
 
-import { NASDAQ_100_SYMBOLS } from './symbols'
+import { NASDAQ_100_SYMBOLS, DEMO_MODE, DEMO_SYMBOLS_LIMIT } from './symbols'
 import { cache, CACHE_TTL, generateCacheKey, getCachedData } from './cache'
 import {
   LightAnalysis,
@@ -29,8 +29,8 @@ export async function lightweightScreening(
   
   const results: LightAnalysis[] = []
   
-  // レート制限対策: 70銘柄ずつバッチ処理
-  const batchSize = 70
+  // レート制限対策: 70銘柄ずつバッチ処理（デモモードでは10銘柄）
+  const batchSize = DEMO_MODE ? 10 : 70
   for (let i = 0; i < symbols.length; i += batchSize) {
     const batch = symbols.slice(i, i + batchSize)
     
@@ -78,11 +78,11 @@ async function analyzeLightweight(
       return null
     }
     
-    // 予備スコア計算
+    // 予備スコア計算（nullチェック）
     const preliminaryScore = (
-      technical * 0.30 +
-      fundamental * 0.35 +
-      sentiment * 0.20 +
+      (technical || 50) * 0.30 +
+      (fundamental || 50) * 0.35 +
+      (sentiment || 50) * 0.20 +
       50 * 0.15  // デフォルトの信頼度
     )
     
@@ -287,11 +287,26 @@ export async function getRecommendedRanking(
   // キャッシュチェック
   const cached = cache.get<RankingResponse<RecommendedScore>>(cacheKey)
   if (cached) {
-    return cached
+    console.log('Returning cached recommended ranking')
+    return {
+      ...cached,
+      metadata: {
+        ...cached.metadata,
+        cacheHit: true
+      }
+    }
   }
   
+  console.log('Starting recommended ranking...')
+  
+  // デモモード: 10銘柄に制限
+  const symbols = DEMO_MODE ? NASDAQ_100_SYMBOLS.slice(0, DEMO_SYMBOLS_LIMIT) : NASDAQ_100_SYMBOLS
+  console.log(`Analyzing ${symbols.length} symbols (Demo mode: ${DEMO_MODE})`)
+  
   // 軽量スクリーニング
-  const analyses = await lightweightScreening(NASDAQ_100_SYMBOLS, apiKeys)
+  const analyses = await lightweightScreening(symbols, apiKeys)
+  
+  console.log(`Lightweight screening returned ${analyses.length} symbols`)
   
   // スコアリング
   const ranked: RecommendedScore[] = analyses
@@ -322,12 +337,14 @@ export async function getRecommendedRanking(
   const result: RankingResponse<RecommendedScore> = {
     rankings: ranked,
     metadata: {
-      totalScanned: NASDAQ_100_SYMBOLS.length,
+      totalScanned: symbols.length,
       timestamp: new Date().toISOString(),
       cacheHit: false,
       executionTime: Date.now() - startTime
     }
   }
+  
+  console.log(`Recommended ranking completed: ${ranked.length} symbols`)
   
   // キャッシュに保存
   cache.set(cacheKey, result, CACHE_TTL.RANKING_RECOMMENDED)

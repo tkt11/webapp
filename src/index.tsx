@@ -435,24 +435,24 @@ app.get('/', (c) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate, max-age=0">
   <meta http-equiv="Pragma" content="no-cache">
-  <meta http-equiv="Expires" content="0">
-  <title>Stock AI Predictor - 株価予測AI v10.2 DEBUG</title>
+  <meta http-equiv="Expires" content="-1">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Stock AI Predictor - 株価予測AI v11.6 FIXED STRUCTURE</title>
   <script>
-    // Force cache clear
-    console.log('%c Application Version: 10.1', 'color: #10b981; font-weight: bold; font-size: 16px;');
-    console.log('%c All fixes applied:', 'color: #3b82f6; font-weight: bold;');
-    console.log('  - Null-safety checks for chart data');
-    console.log('  - ML future predictions (30 days)');
-    console.log('  - Training data extended to 730 days');
-    console.log('  - Feature importance visualization');
-    console.log('%c If you still see errors, press Ctrl+Shift+R!', 'color: #f59e0b; font-weight: bold; font-size: 14px;');
+    // Force cache clear for v11.1
+    console.log('%c Application Version: 11.6 - FIXED HTML STRUCTURE', 'color: #10b981; font-weight: bold; font-size: 16px;');
+    console.log('%c Bug fixes in v11.1:', 'color: #3b82f6; font-weight: bold;');
+    console.log('  - Fixed switchTab function to properly handle events');
+    console.log('  - Rankings tab now displays correctly');
+    console.log('  - All tab buttons now pass event parameter');
+    console.log('%c Press Ctrl+Shift+R to force refresh!', 'color: #f59e0b; font-weight: bold; font-size: 14px;');
   </script>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.tailwindcss.com?v=11.6"></script>
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js?v=11.6"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js?v=11.6"></script>
   <style>
     .tab-content { display: none; }
     .tab-content.active { display: block; }
@@ -545,26 +545,26 @@ app.get('/', (c) => {
     <!-- タブナビゲーション -->
     <div class="bg-white rounded-lg shadow-md mb-6">
       <div class="flex border-b">
-        <button class="tab-button active px-6 py-4 font-semibold" onclick="switchTab('analysis')">
+        <button class="tab-button px-6 py-4 font-semibold" onclick="switchTab('analysis', event)">
           <i class="fas fa-search mr-2"></i>銘柄分析
         </button>
-        <button class="tab-button px-6 py-4 font-semibold" onclick="switchTab('recommendations')">
+        <button class="tab-button px-6 py-4 font-semibold" onclick="switchTab('recommendations', event)">
           <i class="fas fa-star mr-2"></i>おすすめ銘柄TOP10
         </button>
-        <button class="tab-button px-6 py-4 font-semibold" onclick="switchTab('rankings')">
+        <button class="tab-button active px-6 py-4 font-semibold" onclick="switchTab('rankings', event)">
           <i class="fas fa-trophy mr-2"></i>ランキング
         </button>
-        <button class="tab-button px-6 py-4 font-semibold" onclick="switchTab('simulation')">
+        <button class="tab-button px-6 py-4 font-semibold" onclick="switchTab('simulation', event)">
           <i class="fas fa-calculator mr-2"></i>投資シミュレーター
         </button>
-        <button class="tab-button px-6 py-4 font-semibold" onclick="switchTab('backtest')">
+        <button class="tab-button px-6 py-4 font-semibold" onclick="switchTab('backtest', event)">
           <i class="fas fa-history mr-2"></i>バックテスト
         </button>
       </div>
     </div>
 
     <!-- タブ1: 銘柄分析 -->
-    <div id="analysis-tab" class="tab-content active">
+    <div id="analysis-tab" class="tab-content">
       <div class="bg-white rounded-lg shadow-md p-6 mb-6">
         <h2 class="text-2xl font-bold mb-4">
           <i class="fas fa-chart-bar mr-2 text-blue-600"></i>
@@ -820,42 +820,43 @@ app.get('/', (c) => {
         <!-- モーダルの内容はJavaScriptで動的に挿入 -->
       </div>
     </div>
+  </div>
 
-    <!-- ランキングタブ -->
-    <div id="rankings-tab" class="tab-content">
-      <div class="bg-white rounded-lg shadow-md p-6 mb-6">
-        <h2 class="text-2xl font-bold mb-4">
-          <i class="fas fa-trophy mr-2 text-yellow-600"></i>
+  <!-- ランキングタブ -->
+    <div id="rankings-tab" class="tab-content" style="display: block !important;">
+      <div style="background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 24px; margin-bottom: 24px;">
+        <h2 style="font-size: 24px; font-weight: bold; margin-bottom: 16px; color: #1f2937;">
+          <i class="fas fa-trophy" style="margin-right: 8px; color: #eab308;"></i>
           NASDAQ-100 ランキング
         </h2>
-        <p class="text-gray-600 mb-6">
+        <p style="color: #4b5563; margin-bottom: 24px; font-size: 16px;">
           NASDAQ-100銘柄を複数の視点でランキング
         </p>
         
         <!-- ランキングタイプ選択 -->
-        <div class="grid grid-cols-4 gap-4 mb-6">
-          <button onclick="loadRanking('recommended')" class="ranking-type-btn bg-blue-500 text-white px-6 py-3 rounded-lg hover:bg-blue-600">
-            <i class="fas fa-star mr-2"></i>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px;">
+          <button onclick="loadRanking('recommended')" style="background: #3b82f6; color: white; padding: 12px 24px; border-radius: 8px; border: none; cursor: pointer; font-weight: 600; transition: background 0.3s;">
+            <i class="fas fa-star" style="margin-right: 8px;"></i>
             おすすめTOP10
           </button>
-          <button onclick="loadRanking('high-growth')" class="ranking-type-btn bg-green-500 text-white px-6 py-3 rounded-lg hover:bg-green-600">
-            <i class="fas fa-chart-line mr-2"></i>
+          <button onclick="loadRanking('high-growth')" style="background: #10b981; color: white; padding: 12px 24px; border-radius: 8px; border: none; cursor: pointer; font-weight: 600; transition: background 0.3s;">
+            <i class="fas fa-chart-line" style="margin-right: 8px;"></i>
             高成長×信頼度
           </button>
-          <button onclick="loadRanking('short-term')" class="ranking-type-btn bg-orange-500 text-white px-6 py-3 rounded-lg hover:bg-orange-600">
-            <i class="fas fa-bolt mr-2"></i>
+          <button onclick="loadRanking('short-term')" style="background: #f97316; color: white; padding: 12px 24px; border-radius: 8px; border: none; cursor: pointer; font-weight: 600; transition: background 0.3s;">
+            <i class="fas fa-bolt" style="margin-right: 8px;"></i>
             短期トレード
           </button>
-          <button onclick="loadRanking('trending')" class="ranking-type-btn bg-purple-500 text-white px-6 py-3 rounded-lg hover:bg-purple-600">
-            <i class="fas fa-fire mr-2"></i>
+          <button onclick="loadRanking('trending')" style="background: #8b5cf6; color: white; padding: 12px 24px; border-radius: 8px; border: none; cursor: pointer; font-weight: 600; transition: background 0.3s;">
+            <i class="fas fa-fire" style="margin-right: 8px;"></i>
             注目株
           </button>
         </div>
         
         <!-- 期間選択（高成長ランキング用） -->
-        <div id="timeframe-selector" style="display:none;" class="mb-6">
-          <label class="block text-sm font-semibold mb-2">予測期間</label>
-          <select id="ranking-timeframe" class="px-4 py-2 border rounded-lg">
+        <div id="timeframe-selector" style="display:none; margin-bottom: 24px;">
+          <label style="display: block; font-size: 14px; font-weight: 600; margin-bottom: 8px; color: #374151;">予測期間</label>
+          <select id="ranking-timeframe" style="padding: 8px 16px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 16px;">
             <option value="30d">30日後</option>
             <option value="60d">60日後</option>
             <option value="90d" selected>90日後</option>
@@ -863,16 +864,81 @@ app.get('/', (c) => {
         </div>
       </div>
       
-      <div id="rankings-loading" style="display:none;">
-        <div class="loader"></div>
-        <p class="text-center text-gray-600">ランキング計算中... NASDAQ-100銘柄を分析しています（約1-5分）</p>
+      <div id="rankings-loading" style="display:none; text-align: center; padding: 40px;">
+        <div class="loader" style="border: 4px solid #f3f3f3; border-top: 4px solid #3b82f6; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 20px;"></div>
+        <p style="color: #4b5563; font-size: 16px;">ランキング計算中... NASDAQ-100銘柄を分析しています（約1-5分）</p>
+      </div>
+      
+      <!-- 初期表示メッセージ -->
+      <div id="rankings-welcome" style="background: linear-gradient(to right, #eff6ff, #faf5ff); border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 32px; margin-bottom: 24px;">
+        <div style="text-align: center; margin-bottom: 24px;">
+          <i class="fas fa-chart-bar" style="font-size: 64px; color: #3b82f6; margin-bottom: 16px; display: block;"></i>
+          <h3 style="font-size: 24px; font-weight: bold; color: #1f2937; margin-bottom: 8px;">NASDAQ-100 ランキング分析</h3>
+          <p style="color: #4b5563; font-size: 16px;">上のボタンから分析タイプを選択してください</p>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; max-width: 900px; margin: 0 auto;">
+          <div style="background: white; border-radius: 8px; padding: 16px; border-left: 4px solid #3b82f6;">
+            <div style="display: flex; align-items: center; margin-bottom: 8px;">
+              <i class="fas fa-star" style="color: #3b82f6; margin-right: 8px;"></i>
+              <h4 style="font-weight: 600; font-size: 16px;">おすすめTOP10</h4>
+            </div>
+            <p style="font-size: 14px; color: #4b5563; margin-bottom: 8px;">統計モデルによる総合評価ランキング</p>
+            <p style="font-size: 12px; color: #6b7280;">
+              <i class="fas fa-clock" style="margin-right: 4px;"></i>即時表示
+              <span style="margin-left: 8px;"><i class="fas fa-dollar-sign" style="margin-right: 4px;"></i>無料</span>
+            </p>
+          </div>
+          
+          <div style="background: white; border-radius: 8px; padding: 16px; border-left: 4px solid #10b981;">
+            <div style="display: flex; align-items: center; margin-bottom: 8px;">
+              <i class="fas fa-chart-line" style="color: #10b981; margin-right: 8px;"></i>
+              <h4 style="font-weight: 600; font-size: 16px;">高成長×信頼度</h4>
+            </div>
+            <p style="font-size: 14px; color: #4b5563; margin-bottom: 8px;">GPT-5-miniによる成長予測分析</p>
+            <p style="font-size: 12px; color: #6b7280;">
+              <i class="fas fa-clock" style="margin-right: 4px;"></i>1-5分
+              <span style="margin-left: 8px;"><i class="fas fa-dollar-sign" style="margin-right: 4px;"></i>$1.50/回</span>
+            </p>
+          </div>
+          
+          <div style="background: white; border-radius: 8px; padding: 16px; border-left: 4px solid #f97316;">
+            <div style="display: flex; align-items: center; margin-bottom: 8px;">
+              <i class="fas fa-bolt" style="color: #f97316; margin-right: 8px;"></i>
+              <h4 style="font-weight: 600; font-size: 16px;">短期トレード</h4>
+            </div>
+            <p style="font-size: 14px; color: #4b5563; margin-bottom: 8px;">テクニカル指標による短期推奨銘柄</p>
+            <p style="font-size: 12px; color: #6b7280;">
+              <i class="fas fa-clock" style="margin-right: 4px;"></i>即時表示
+              <span style="margin-left: 8px;"><i class="fas fa-dollar-sign" style="margin-right: 4px;"></i>無料</span>
+            </p>
+          </div>
+          
+          <div style="background: white; border-radius: 8px; padding: 16px; border-left: 4px solid #8b5cf6;">
+            <div style="display: flex; align-items: center; margin-bottom: 8px;">
+              <i class="fas fa-fire" style="color: #8b5cf6; margin-right: 8px;"></i>
+              <h4 style="font-weight: 600; font-size: 16px;">注目株</h4>
+            </div>
+            <p style="font-size: 14px; color: #4b5563; margin-bottom: 8px;">ニュース・SNS・アナリスト評価による注目銘柄</p>
+            <p style="font-size: 12px; color: #6b7280;">
+              <i class="fas fa-clock" style="margin-right: 4px;"></i>即時表示
+              <span style="margin-left: 8px;"><i class="fas fa-dollar-sign" style="margin-right: 4px;"></i>無料</span>
+            </p>
+          </div>
+        </div>
+        
+        <div style="margin-top: 24px; text-align: center;">
+          <p style="font-size: 14px; color: #6b7280;">
+            <i class="fas fa-info-circle" style="margin-right: 4px;"></i>
+            各ランキングはキャッシュされており、一定期間内は同じ結果が表示されます
+          </p>
+        </div>
       </div>
       
       <div id="rankings-result" style="display:none;">
         <!-- 結果はJavaScriptで動的に挿入 -->
       </div>
     </div>
-  </div>
 
   <script>
     // グローバル変数: 分析データを保存
@@ -1321,12 +1387,27 @@ app.get('/', (c) => {
     }
 
     // タブ切り替え
-    function switchTab(tabName) {
+    window.switchTab = function(tabName, event) {
+      console.log('Switching to tab:', tabName)
       document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'))
       document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'))
       
-      document.getElementById(tabName + '-tab').classList.add('active')
-      event.target.closest('.tab-button').classList.add('active')
+      const targetTab = document.getElementById(tabName + '-tab')
+      if (targetTab) {
+        targetTab.classList.add('active')
+        console.log('Tab activated:', tabName + '-tab')
+        console.log('Tab display after activation:', window.getComputedStyle(targetTab).display)
+      } else {
+        console.error('Tab not found:', tabName + '-tab')
+      }
+      
+      if (event && event.target) {
+        const button = event.target.closest('.tab-button')
+        if (button) {
+          button.classList.add('active')
+          console.log('Button activated')
+        }
+      }
     }
 
     // 銘柄分析
@@ -4554,6 +4635,8 @@ app.get('/', (c) => {
       }
       
       // ローディング表示
+      const welcomeDiv = document.getElementById('rankings-welcome')
+      if (welcomeDiv) welcomeDiv.style.display = 'none'
       document.getElementById('rankings-loading').style.display = 'block'
       document.getElementById('rankings-result').style.display = 'none'
       
@@ -4896,6 +4979,25 @@ app.get('/', (c) => {
       document.getElementById('sim-purchase-date').value = threeMonthsAgo.toISOString().split('T')[0]
       document.getElementById('sim-sell-date').value = today.toISOString().split('T')[0]
       document.getElementById('backtest-date').value = sixMonthsAgo.toISOString().split('T')[0]
+      
+      // Check if rankings welcome screen exists
+      const rankingsWelcome = document.getElementById('rankings-welcome')
+      const rankingsTab = document.getElementById('rankings-tab')
+      console.log('%c Rankings Welcome Screen Check:', 'color: #8b5cf6; font-weight: bold;')
+      console.log('  - Rankings Tab exists:', !!rankingsTab)
+      console.log('  - Rankings Tab classes:', rankingsTab?.className)
+      console.log('  - Welcome element exists:', !!rankingsWelcome)
+      if (rankingsWelcome) {
+        console.log('  - Welcome display style:', window.getComputedStyle(rankingsWelcome).display)
+        console.log('  - Welcome visibility:', window.getComputedStyle(rankingsWelcome).visibility)
+      }
+      if (rankingsTab) {
+        console.log('  - Rankings Tab display style:', window.getComputedStyle(rankingsTab).display)
+      }
+      
+      // Test switchTab function
+      console.log('%c Testing switchTab function:', 'color: #f59e0b; font-weight: bold;')
+      console.log('  - switchTab function exists:', typeof window.switchTab !== 'undefined')
     })
   </script>
 </body>

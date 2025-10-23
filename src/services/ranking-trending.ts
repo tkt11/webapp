@@ -4,7 +4,7 @@
  * ニュース + ソーシャル + アナリスト評価
  */
 
-import { NASDAQ_100_SYMBOLS } from './symbols'
+import { NASDAQ_100_SYMBOLS, DEMO_MODE, DEMO_SYMBOLS_LIMIT } from './symbols'
 import { cache, CACHE_TTL, generateCacheKey, getCachedData } from './cache'
 import { TrendingScore, RankingResponse } from '../types'
 
@@ -31,13 +31,17 @@ export async function getTrendingRanking(
   
   console.log('Starting trending stocks ranking...')
   
+  // デモモード: 10銘柄に制限
+  const symbols = DEMO_MODE ? NASDAQ_100_SYMBOLS.slice(0, DEMO_SYMBOLS_LIMIT) : NASDAQ_100_SYMBOLS
+  console.log(`Analyzing ${symbols.length} symbols (Demo mode: ${DEMO_MODE})`)
+  
   // 全銘柄を分析
   const analyses: TrendingScore[] = []
   
   // バッチ処理
-  const batchSize = 70
-  for (let i = 0; i < NASDAQ_100_SYMBOLS.length; i += batchSize) {
-    const batch = NASDAQ_100_SYMBOLS.slice(i, i + batchSize)
+  const batchSize = DEMO_MODE ? 10 : 70
+  for (let i = 0; i < symbols.length; i += batchSize) {
+    const batch = symbols.slice(i, i + batchSize)
     
     const batchResults = await Promise.all(
       batch.map(symbol => analyzeTrending(symbol, apiKeys))
@@ -45,14 +49,14 @@ export async function getTrendingRanking(
     
     analyses.push(...batchResults.filter(r => r !== null) as TrendingScore[])
     
-    if (i + batchSize < NASDAQ_100_SYMBOLS.length) {
+    if (i + batchSize < symbols.length) {
       await sleep(60000)
     }
   }
   
   // フィルタリング + ランキング
+  // FIXED: 50点以上のフィルターが厳しすぎるため、すべての結果を返す（フィルターなし）
   const ranked = analyses
-    .filter(a => a.totalScore > 50)
     .sort((a, b) => b.totalScore - a.totalScore)
     .slice(0, 10)
   
@@ -143,9 +147,24 @@ async function getQuote(symbol: string, apiKey: string): Promise<number | null> 
     const response = await fetch(
       `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${apiKey}`
     )
+    
+    // Check if response is OK
+    if (!response.ok) {
+      console.error(`Finnhub quote API error for ${symbol}: ${response.status}`)
+      return null
+    }
+    
+    // Check content-type to avoid HTML errors
+    const contentType = response.headers.get('content-type')
+    if (!contentType || !contentType.includes('application/json')) {
+      console.error(`Finnhub quote API returned non-JSON for ${symbol}: ${contentType}`)
+      return null
+    }
+    
     const data = await response.json()
     return data.c || null
   } catch (error) {
+    console.error(`Error fetching quote for ${symbol}:`, error)
     return null
   }
 }
@@ -205,6 +224,18 @@ async function getAnalystScore(symbol: string, apiKey: string): Promise<number> 
     const response = await fetch(
       `https://finnhub.io/api/v1/stock/recommendation?symbol=${symbol}&token=${apiKey}`
     )
+    
+    // Check if response is OK
+    if (!response.ok) {
+      return 50
+    }
+    
+    // Check content-type
+    const contentType = response.headers.get('content-type')
+    if (!contentType || !contentType.includes('application/json')) {
+      return 50
+    }
+    
     const data = await response.json()
     
     if (!data || data.length === 0) {
@@ -213,7 +244,11 @@ async function getAnalystScore(symbol: string, apiKey: string): Promise<number> 
     
     // 最新のレーティング
     const latest = data[0]
-    const buyRatio = latest.buy / (latest.buy + latest.hold + latest.sell)
+    const totalRatings = latest.buy + latest.hold + latest.sell
+    if (totalRatings === 0) {
+      return 50
+    }
+    const buyRatio = latest.buy / totalRatings
     
     return buyRatio * 100
   } catch (error) {
@@ -229,6 +264,18 @@ async function getFundamentalGrowth(symbol: string, apiKey: string): Promise<num
     const response = await fetch(
       `https://finnhub.io/api/v1/stock/metric?symbol=${symbol}&metric=all&token=${apiKey}`
     )
+    
+    // Check if response is OK
+    if (!response.ok) {
+      return 50
+    }
+    
+    // Check content-type
+    const contentType = response.headers.get('content-type')
+    if (!contentType || !contentType.includes('application/json')) {
+      return 50
+    }
+    
     const data = await response.json()
     
     if (!data.metric) {
