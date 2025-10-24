@@ -68,6 +68,12 @@ export async function getShortTermRanking(
   
   console.log(`[SHORT-TERM] Analyzed ${analyses.length} symbols successfully`)
   
+  if (analyses.length === 0) {
+    console.warn('[SHORT-TERM] WARNING: No valid analyses returned! All symbols returned null.')
+  } else {
+    console.log('[SHORT-TERM] Sample analysis:', analyses[0])
+  }
+  
   // フィルタリング + ランキング（注目株と同じロジックでフィルタリングを緩和）
   const ranked = analyses
     .sort((a, b) => b.totalScore - a.totalScore)
@@ -100,35 +106,31 @@ async function analyzeShortTerm(
   try {
     const cacheKey = generateCacheKey('short_term_analysis', symbol)
     return await getCachedData(cacheKey, CACHE_TTL.RANKING_SHORT_TERM, async () => {
-      // 5分足データ取得
-      const intradayResponse = await fetch(
-        `https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=${symbol}&interval=5min&apikey=${apiKeys.alphaVantage}&outputsize=compact`
-      )
-      const intradayData = await intradayResponse.json()
-      
-      // 日次データも取得（ボラティリティ計算用）
+      // 日次データ取得（5分足はAlpha Vantage無料プランで制限があるため日次のみ使用）
       const dailyResponse = await fetch(
         `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&apikey=${apiKeys.alphaVantage}&outputsize=compact`
       )
       const dailyData = await dailyResponse.json()
       
-      if (!intradayData['Time Series (5min)'] || !dailyData['Time Series (Daily)']) {
+      if (!dailyData['Time Series (Daily)']) {
+        console.warn(`[SHORT-TERM] No daily data for ${symbol}`)
         return null
       }
       
       // 価格データ抽出
-      const intradayPrices = Object.values(intradayData['Time Series (5min)'])
-        .slice(0, 100)
-        .map((candle: any) => parseFloat(candle['4. close']))
-      
       const dailyPrices = Object.values(dailyData['Time Series (Daily)'])
-        .slice(0, 30)
+        .slice(0, 60)  // 60日分取得
         .map((day: any) => parseFloat(day['4. close']))
       
-      const currentPrice = intradayPrices[0]
+      if (dailyPrices.length < 30) {
+        console.warn(`[SHORT-TERM] Insufficient data for ${symbol}: ${dailyPrices.length} days`)
+        return null
+      }
       
-      // テクニカルシグナル計算
-      const technical = calculateTechnicalSignals(dailyPrices, intradayPrices)
+      const currentPrice = dailyPrices[0]
+      
+      // テクニカルシグナル計算（日次データのみ使用）
+      const technical = calculateTechnicalSignals(dailyPrices, dailyPrices)
       
       // エントリータイミング判定
       let entryTiming: 'NOW' | 'WAIT' | 'AVOID' = 'WAIT'

@@ -1521,6 +1521,14 @@ app.get('/', (c) => {
         const response = await axios.post('/api/analyze', { symbol, trainModel, enableBackfit })
         const data = response.data
         
+        // デバッグ: データ構造を確認
+        console.log('[ANALYZE] Analysis data received:', {
+          has_future: !!data.prediction.future,
+          has_ml_training: !!data.prediction.ml_training,
+          has_ml_future: !!data.prediction.ml_training?.future_predictions,
+          future_dates_count: data.prediction.future?.dates?.length || 0
+        })
+        
         // グローバルに保存してモーダルから参照可能にする
         window.currentAnalysisData = data
 
