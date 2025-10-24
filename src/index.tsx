@@ -369,7 +369,7 @@ app.post('/api/rankings/recommended', async (c) => {
     }
     
     // キャッシュなし → 同期的に生成（初回のみ時間がかかる）
-    console.log('🔄 No cache found, generating recommended ranking...')
+    console.log('[NO CACHE], generating recommended ranking...')
     const { getRecommendedRanking } = await import('./services/ranking')
     
     const result = await getRecommendedRanking({
@@ -377,7 +377,7 @@ app.post('/api/rankings/recommended', async (c) => {
       finnhub: env.FINNHUB_API_KEY
     })
     
-    console.log('✅ Recommended ranking generated successfully')
+    console.log('[OK] Recommended ranking generated successfully')
     return c.json(result)
   } catch (error: any) {
     console.error('Recommended ranking error:', error)
@@ -404,7 +404,7 @@ app.post('/api/rankings/high-growth', async (c) => {
     }
     
     // キャッシュなし → 同期的に生成（初回のみ時間がかかる）
-    console.log(`🔄 No cache found, generating high-growth ranking for ${timeframe}...`)
+    console.log(`[NO CACHE], generating high-growth ranking for ${timeframe}...`)
     const { getHighGrowthRanking } = await import('./services/ranking-highgrowth')
     
     const result = await getHighGrowthRanking(timeframe, {
@@ -414,7 +414,7 @@ app.post('/api/rankings/high-growth', async (c) => {
       fred: env.FRED_API_KEY
     })
     
-    console.log('✅ High-growth ranking generated successfully')
+    console.log('[OK] High-growth ranking generated successfully')
     return c.json(result)
   } catch (error: any) {
     console.error('High-growth ranking error:', error)
@@ -440,7 +440,7 @@ app.post('/api/rankings/short-term', async (c) => {
     }
     
     // キャッシュなし → 同期的に生成（初回のみ時間がかかる）
-    console.log('🔄 No cache found, generating short-term ranking...')
+    console.log('[NO CACHE], generating short-term ranking...')
     const { getShortTermRanking } = await import('./services/ranking-shortterm')
     
     const result = await getShortTermRanking({
@@ -448,7 +448,7 @@ app.post('/api/rankings/short-term', async (c) => {
       finnhub: env.FINNHUB_API_KEY
     })
     
-    console.log('✅ Short-term ranking generated successfully')
+    console.log('[OK] Short-term ranking generated successfully')
     return c.json(result)
   } catch (error: any) {
     console.error('Short-term ranking error:', error)
@@ -474,7 +474,7 @@ app.post('/api/rankings/trending', async (c) => {
     }
     
     // キャッシュなし → 同期的に生成（初回のみ時間がかかる）
-    console.log('🔄 No cache found, generating trending ranking...')
+    console.log('[NO CACHE], generating trending ranking...')
     const { getTrendingRanking } = await import('./services/ranking-trending')
     
     const result = await getTrendingRanking({
@@ -482,7 +482,7 @@ app.post('/api/rankings/trending', async (c) => {
       finnhub: env.FINNHUB_API_KEY
     })
     
-    console.log('✅ Trending ranking generated successfully')
+    console.log('[OK] Trending ranking generated successfully')
     return c.json(result)
   } catch (error: any) {
     console.error('Trending ranking error:', error)
@@ -2315,10 +2315,10 @@ app.get('/', (c) => {
                   </p>
                   <p class="text-xs text-gray-600 mt-2">
                     \${Math.abs(data.prediction.ml_training.performance_metrics.generalization_gap) < 2 
-                      ? '✅ 優秀: 過学習なく汎化性能が高い' 
+                      ? '[OK] 優秀: 過学習なく汎化性能が高い' 
                       : Math.abs(data.prediction.ml_training.performance_metrics.generalization_gap) < 5 
                       ? '⚠️ 注意: 若干の過学習の可能性' 
-                      : '❌ 過学習: 学習データへの過適応が見られる'}
+                      : '[ERROR] 過学習: 学習データへの過適応が見られる'}
                   </p>
                 </div>
               </div>
@@ -2431,7 +2431,7 @@ app.get('/', (c) => {
               <div class="grid grid-cols-3 gap-4 mb-4">
                 <div class="bg-white p-4 rounded-lg shadow border-l-4 border-green-500">
                   <p class="text-lg font-bold text-green-600 mb-2">信頼度 70%以上</p>
-                  <p class="text-sm text-gray-700">✅ <strong>積極推奨:</strong> 高い確信度での投資判断が可能</p>
+                  <p class="text-sm text-gray-700">[OK] <strong>積極推奨:</strong> 高い確信度での投資判断が可能</p>
                   <p class="text-xs text-gray-500 mt-2">各次元のスコアが一致し、予測の信頼性が非常に高い状態</p>
                 </div>
                 <div class="bg-white p-4 rounded-lg shadow border-l-4 border-yellow-500">
@@ -2441,16 +2441,16 @@ app.get('/', (c) => {
                 </div>
                 <div class="bg-white p-4 rounded-lg shadow border-l-4 border-red-500">
                   <p class="text-lg font-bold text-red-600 mb-2">信頼度 50%未満</p>
-                  <p class="text-sm text-gray-700">❌ <strong>非推奨:</strong> 投資判断を見送ることを推奨</p>
+                  <p class="text-sm text-gray-700">[ERROR] <strong>非推奨:</strong> 投資判断を見送ることを推奨</p>
                   <p class="text-xs text-gray-500 mt-2">スコアのばらつきが大きく、予測の信頼性が低い状態</p>
                 </div>
               </div>
               <div class="bg-indigo-50 p-4 rounded-lg">
                 <p class="text-sm font-bold mb-2">現在の信頼度: <span class="text-2xl \${data.prediction.confidence >= 70 ? 'text-green-600' : data.prediction.confidence >= 50 ? 'text-yellow-600' : 'text-red-600'}">\${data.prediction.confidence}%</span></p>
                 <p class="text-sm text-gray-700">
-                  \${data.prediction.confidence >= 70 ? '✅ この銘柄は高信頼度で投資推奨されます' : 
+                  \${data.prediction.confidence >= 70 ? '[OK] この銘柄は高信頼度で投資推奨されます' : 
                      data.prediction.confidence >= 50 ? '⚠️ この銘柄は慎重な判断が必要です' : 
-                     '❌ この銘柄は現時点で投資を見送ることを推奨します'}
+                     '[ERROR] この銘柄は現時点で投資を見送ることを推奨します'}
                 </p>
               </div>
             </div>
@@ -2471,14 +2471,14 @@ app.get('/', (c) => {
                   
                   <div class="space-y-3">
                     <div class="bg-blue-50 p-3 rounded">
-                      <p class="text-xs font-bold text-blue-800 mb-2">📊 基本計算式</p>
+                      <p class="text-xs font-bold text-blue-800 mb-2">[STATS] 基本計算式</p>
                       <code class="text-xs bg-blue-100 px-2 py-1 rounded block">
                         信頼度 = 100 - (標準偏差 × 調整係数)
                       </code>
                     </div>
                     
                     <div class="bg-gray-50 p-3 rounded">
-                      <p class="text-xs font-bold text-gray-800 mb-2">🔍 計算ロジック</p>
+                      <p class="text-xs font-bold text-gray-800 mb-2">[INFO] 計算ロジック</p>
                       <ul class="text-xs text-gray-700 space-y-1">
                         <li>1. 5次元スコアを収集（テクニカル、ファンダメンタル等）</li>
                         <li>2. スコアの標準偏差を計算</li>
@@ -2488,7 +2488,7 @@ app.get('/', (c) => {
                     </div>
                     
                     <div class="bg-green-50 p-3 rounded">
-                      <p class="text-xs font-bold text-green-800 mb-2">✅ 特徴</p>
+                      <p class="text-xs font-bold text-green-800 mb-2">[OK] 特徴</p>
                       <ul class="text-xs text-gray-700 space-y-1">
                         <li>• 各次元のスコア一貫性を重視</li>
                         <li>• 解釈性が高い</li>
@@ -2514,14 +2514,14 @@ app.get('/', (c) => {
                   
                   <div class="space-y-3">
                     <div class="bg-green-50 p-3 rounded">
-                      <p class="text-xs font-bold text-green-800 mb-2">📊 基本計算式</p>
+                      <p class="text-xs font-bold text-green-800 mb-2">[STATS] 基本計算式</p>
                       <code class="text-xs bg-green-100 px-2 py-1 rounded block">
                         信頼度 = (R²スコア × 0.7) + ((1 - 正規化RMSE) × 0.3)
                       </code>
                     </div>
                     
                     <div class="bg-gray-50 p-3 rounded">
-                      <p class="text-xs font-bold text-gray-800 mb-2">🔍 計算ロジック</p>
+                      <p class="text-xs font-bold text-gray-800 mb-2">[INFO] 計算ロジック</p>
                       <ul class="text-xs text-gray-700 space-y-1">
                         <li>1. テストデータでR²スコア計算（決定係数）</li>
                         <li>2. RMSE（誤差）を価格で正規化</li>
@@ -2531,7 +2531,7 @@ app.get('/', (c) => {
                     </div>
                     
                     <div class="bg-purple-50 p-3 rounded">
-                      <p class="text-xs font-bold text-purple-800 mb-2">✅ 特徴</p>
+                      <p class="text-xs font-bold text-purple-800 mb-2">[OK] 特徴</p>
                       <ul class="text-xs text-gray-700 space-y-1">
                         <li>• モデルの予測精度を直接反映</li>
                         <li>• テストデータで検証済み</li>
@@ -3141,7 +3141,7 @@ app.get('/', (c) => {
                 <div class="grid grid-cols-3 gap-4">
                   <div class="bg-green-500 bg-opacity-20 p-3 rounded">
                     <div class="flex items-center justify-between mb-2">
-                      <p class="text-xs font-bold">🎯 ベストケース</p>
+                      <p class="text-xs font-bold">[DEBUG] ベストケース</p>
                       <span class="text-xs bg-white bg-opacity-20 px-2 py-1 rounded">\${data.prediction.gpt5_final_judgment.scenario_analysis.best_case.probability}%</span>
                     </div>
                     <p class="text-2xl font-bold mb-1">$\${data.prediction.gpt5_final_judgment.scenario_analysis.best_case.price_target.toFixed(2)}</p>
@@ -3153,7 +3153,7 @@ app.get('/', (c) => {
                   </div>
                   <div class="bg-blue-500 bg-opacity-20 p-3 rounded">
                     <div class="flex items-center justify-between mb-2">
-                      <p class="text-xs font-bold">📊 ベースケース</p>
+                      <p class="text-xs font-bold">[STATS] ベースケース</p>
                       <span class="text-xs bg-white bg-opacity-20 px-2 py-1 rounded">\${data.prediction.gpt5_final_judgment.scenario_analysis.base_case.probability}%</span>
                     </div>
                     <p class="text-2xl font-bold mb-1">$\${data.prediction.gpt5_final_judgment.scenario_analysis.base_case.price_target.toFixed(2)}</p>
@@ -3902,13 +3902,13 @@ app.get('/', (c) => {
         
         // 学習曲線チャート（学習が実行された場合のみ）
         if (data.prediction.ml_training) {
-          console.log('✅ ml_training exists, rendering learning curves...')
+          console.log('[OK] ml_training exists, rendering learning curves...')
           const learningCurveElement = document.getElementById('learningCurveChart')
           if (!learningCurveElement) {
-            console.error('❌ ERROR: learningCurveChart element not found in DOM!')
+            console.error('[ERROR] ERROR: learningCurveChart element not found in DOM!')
             console.log('Available elements:', document.querySelectorAll('canvas').length, 'canvas elements')
           } else {
-            console.log('✅ learningCurveChart element found')
+            console.log('[OK] learningCurveChart element found')
           }
           const learningCurveCtx = learningCurveElement.getContext('2d')
           const trainingData = data.prediction.ml_training
@@ -4023,22 +4023,22 @@ app.get('/', (c) => {
           })
           
           // ML未来予測チャート（過去30日 + 未来30日）
-          console.log('🔍 Checking future predictions:', {
+          console.log('[INFO] Checking future predictions:', {
             has_future_predictions: !!trainingData.future_predictions,
             has_backfit: !!data.prediction.backfit,
             future_data: trainingData.future_predictions
           })
           
           if (trainingData.future_predictions) {
-            console.log('✅ Rendering ML future price chart')
+            console.log('[OK] Rendering ML future price chart')
             const mlFuturePriceElement = document.getElementById('mlFuturePriceChart')
             if (!mlFuturePriceElement) {
-              console.error('❌ ERROR: mlFuturePriceChart element not found in DOM!')
+              console.error('[ERROR] ERROR: mlFuturePriceChart element not found in DOM!')
               console.log('Searching for element...')
               const allCanvases = document.querySelectorAll('canvas')
               console.log('Found', allCanvases.length, 'canvas elements:', Array.from(allCanvases).map(c => c.id))
             } else {
-              console.log('✅ mlFuturePriceChart element found')
+              console.log('[OK] mlFuturePriceChart element found')
             }
             
             try {
@@ -4181,15 +4181,15 @@ app.get('/', (c) => {
               }
             })
             
-            console.log('✅ ML future price chart created successfully')
+            console.log('[OK] ML future price chart created successfully')
             } catch (error) {
-              console.error('❌ ERROR creating ML future price chart:', error)
+              console.error('[ERROR] ERROR creating ML future price chart:', error)
             }
           }
           
           // ML バックフィットチャート（過去30日の予測精度検証）
           if (trainingData.backfit_predictions) {
-            console.log('✅ Rendering ML backfit chart')
+            console.log('[OK] Rendering ML backfit chart')
             const mlBackfitElement = document.getElementById('mlBackfitChart')
             if (mlBackfitElement) {
               const mlBackfitCtx = mlBackfitElement.getContext('2d')
@@ -4270,24 +4270,24 @@ app.get('/', (c) => {
                 }
               })
               
-              console.log('✅ ML backfit chart created successfully')
+              console.log('[OK] ML backfit chart created successfully')
             }
           }
         }
 
         // ML予測: 予測比較チャート
-        console.log('🔍 Checking ML prediction data:', {
+        console.log('[INFO] Checking ML prediction data:', {
           has_ml_prediction: !!data.prediction.ml_prediction,
           ml_data: data.prediction.ml_prediction
         })
         
         if (data.prediction.ml_prediction) {
-          console.log('✅ Rendering prediction comparison chart')
+          console.log('[OK] Rendering prediction comparison chart')
           const comparisonElement = document.getElementById('predictionComparisonChart')
           if (!comparisonElement) {
-            console.error('❌ ERROR: predictionComparisonChart element not found in DOM!')
+            console.error('[ERROR] ERROR: predictionComparisonChart element not found in DOM!')
           } else {
-            console.log('✅ predictionComparisonChart element found')
+            console.log('[OK] predictionComparisonChart element found')
           }
           
           try {
@@ -4353,9 +4353,9 @@ app.get('/', (c) => {
             }
           })
           
-          console.log('✅ Prediction comparison chart created successfully')
+          console.log('[OK] Prediction comparison chart created successfully')
           } catch (error) {
-            console.error('❌ ERROR creating prediction comparison chart:', error)
+            console.error('[ERROR] ERROR creating prediction comparison chart:', error)
           }
         }
 
@@ -4686,7 +4686,7 @@ app.get('/', (c) => {
     
     // ランキング読み込み
     async function loadRanking(type) {
-      console.log(`🎯 loadRanking called with type: ${type}`)
+      console.log('[loadRanking] Called with type:', type)
       
       // すべてのランキングボタンをリセット
       document.querySelectorAll('#rankings-tab button').forEach(btn => {
@@ -4740,12 +4740,12 @@ app.get('/', (c) => {
             break
         }
         
-        console.log(`📡 Sending POST request to: ${endpoint}`)
-        console.log(`📦 Request body:`, requestBody)
+        console.log('[API] Sending POST request to:', endpoint)
+        console.log('[API] Request body:', requestBody)
         
         const response = await axios.post(endpoint, requestBody)
         
-        console.log(`✅ Response received:`, response.status, response.data)
+        console.log('[API] Response received:', response.status, response.data)
         
         // 202 Accepted（処理中）の場合
         if (response.status === 202) {
@@ -4789,7 +4789,7 @@ app.get('/', (c) => {
     
     // グローバルスコープに即座に公開
     window.loadRanking = loadRanking
-    console.log('✅ loadRanking function registered to window')
+    console.log('[Init] loadRanking function registered to window')
     
     // ランキング結果表示
     function displayRankingResults(type, data) {
@@ -5060,7 +5060,7 @@ app.get('/', (c) => {
     
     // グローバルスコープに即座に公開
     window.analyzeStockFromRanking = analyzeStockFromRanking
-    console.log('✅ analyzeStockFromRanking function registered to window')
+    console.log('[Init] analyzeStockFromRanking function registered to window')
 
     // グローバルに分析データを保存（analyzeStock関数内で設定）
     // let currentAnalysisData = null  // 既にグローバルスコープで宣言済み
