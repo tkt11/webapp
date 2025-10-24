@@ -68,6 +68,7 @@ async function analyzeLightweight(
     }
     
     // 並列でデータ取得
+    console.log(`📊 Fetching data for ${symbol}...`)
     const [quote, technical, fundamental, sentiment] = await Promise.all([
       getQuoteData(symbol, apiKeys.finnhub),
       getTechnicalScore(symbol, apiKeys.alphaVantage),
@@ -75,7 +76,10 @@ async function analyzeLightweight(
       getSentimentScore(symbol, apiKeys.alphaVantage)
     ])
     
+    console.log(`${symbol}: quote=${JSON.stringify(quote)}, tech=${technical}, fund=${fundamental}, sent=${sentiment}`)
+    
     if (!quote) {
+      console.error(`❌ ${symbol}: No quote data, skipping`)
       return null
     }
     
@@ -113,18 +117,28 @@ async function getQuoteData(symbol: string, apiKey: string): Promise<{ price: nu
   try {
     const cacheKey = generateCacheKey('quote', symbol)
     return await getCachedData(cacheKey, CACHE_TTL.REALTIME_QUOTE, async () => {
-      const response = await fetch(
-        `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${apiKey}`
-      )
-      const data = await response.json()
+      console.log(`🔍 Fetching quote for ${symbol} from Finnhub...`)
+      const url = `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${apiKey}`
+      const response = await fetch(url)
       
-      if (data.c) {
+      if (!response.ok) {
+        console.error(`❌ Finnhub API error for ${symbol}: ${response.status} ${response.statusText}`)
+        return null
+      }
+      
+      const data = await response.json()
+      console.log(`📈 ${symbol} quote response:`, JSON.stringify(data).substring(0, 200))
+      
+      if (data.c && data.c > 0) {
+        console.log(`✅ ${symbol} price: $${data.c}`)
         return { price: data.c }
       }
+      
+      console.warn(`⚠️ ${symbol}: Invalid quote data (c=${data.c})`)
       return null
     })
   } catch (error) {
-    console.error(`Error fetching quote for ${symbol}:`, error)
+    console.error(`❌ Error fetching quote for ${symbol}:`, error)
     return null
   }
 }
@@ -285,10 +299,15 @@ export async function getRecommendedRanking(
   const startTime = Date.now()
   const cacheKey = 'ranking:recommended'
   
+  // API キーの検証
+  console.log(`🔑 API Keys check:`)
+  console.log(`  - Alpha Vantage: ${apiKeys.alphaVantage ? apiKeys.alphaVantage.substring(0, 8) + '...' : 'MISSING'}`)
+  console.log(`  - Finnhub: ${apiKeys.finnhub ? apiKeys.finnhub.substring(0, 8) + '...' : 'MISSING'}`)
+  
   // キャッシュチェック
   const cached = cache.get<RankingResponse<RecommendedScore>>(cacheKey)
   if (cached) {
-    console.log('Returning cached recommended ranking')
+    console.log('✅ Returning cached recommended ranking')
     return {
       ...cached,
       metadata: {
@@ -298,7 +317,7 @@ export async function getRecommendedRanking(
     }
   }
   
-  console.log('Starting recommended ranking...')
+  console.log('🚀 Starting recommended ranking generation...')
   
   // デモモード: 10銘柄に制限
   const symbols = DEMO_MODE ? NASDAQ_100_SYMBOLS.slice(0, DEMO_SYMBOLS_LIMIT) : NASDAQ_100_SYMBOLS
