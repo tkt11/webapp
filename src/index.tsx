@@ -343,14 +343,36 @@ app.post('/api/backtest', async (c) => {
 app.post('/api/rankings/recommended', async (c) => {
   try {
     const { env } = c
+    const { cache } = await import('./services/cache')
+    const cacheKey = 'ranking:recommended'
+    
+    // キャッシュチェック
+    const cached = cache.get(cacheKey)
+    if (cached) {
+      console.log('Returning cached recommended ranking (fast path)')
+      return c.json(cached)
+    }
+    
+    // キャッシュなし → バックグラウンドで生成開始
+    console.log('No cache, starting background generation...')
     const { getRecommendedRanking } = await import('./services/ranking')
     
-    const result = await getRecommendedRanking({
-      alphaVantage: env.ALPHA_VANTAGE_API_KEY,
-      finnhub: env.FINNHUB_API_KEY
-    })
+    // バックグラウンドでランキング生成
+    c.executionCtx.waitUntil(
+      getRecommendedRanking({
+        alphaVantage: env.ALPHA_VANTAGE_API_KEY,
+        finnhub: env.FINNHUB_API_KEY
+      }).catch(err => {
+        console.error('Background ranking generation failed:', err)
+      })
+    )
     
-    return c.json(result)
+    // すぐに202 Acceptedを返す
+    return c.json({
+      status: 'processing',
+      message: 'ランキングを生成中です。10秒後に再度お試しください。',
+      retryAfter: 10
+    }, 202)
   } catch (error: any) {
     console.error('Recommended ranking error:', error)
     return c.json({
@@ -410,14 +432,36 @@ app.post('/api/rankings/short-term', async (c) => {
 app.post('/api/rankings/trending', async (c) => {
   try {
     const { env } = c
+    const { cache } = await import('./services/cache')
+    const cacheKey = 'ranking:trending'
+    
+    // キャッシュチェック
+    const cached = cache.get(cacheKey)
+    if (cached) {
+      console.log('Returning cached trending ranking (fast path)')
+      return c.json(cached)
+    }
+    
+    // キャッシュなし → バックグラウンドで生成開始
+    console.log('No cache, starting background generation...')
     const { getTrendingRanking } = await import('./services/ranking-trending')
     
-    const result = await getTrendingRanking({
-      alphaVantage: env.ALPHA_VANTAGE_API_KEY,
-      finnhub: env.FINNHUB_API_KEY
-    })
+    // バックグラウンドでランキング生成
+    c.executionCtx.waitUntil(
+      getTrendingRanking({
+        alphaVantage: env.ALPHA_VANTAGE_API_KEY,
+        finnhub: env.FINNHUB_API_KEY
+      }).catch(err => {
+        console.error('Background ranking generation failed:', err)
+      })
+    )
     
-    return c.json(result)
+    // すぐに202 Acceptedを返す
+    return c.json({
+      status: 'processing',
+      message: 'ランキングを生成中です。10秒後に再度お試しください。',
+      retryAfter: 10
+    }, 202)
   } catch (error: any) {
     console.error('Trending ranking error:', error)
     return c.json({
@@ -4650,6 +4694,8 @@ app.get('/', (c) => {
       
       document.querySelector('#rankings-loading p').textContent = loadingMessages[type] || 'ランキング計算中...'
       
+      let isProcessing = false
+      
       try {
         let endpoint = ''
         let requestBody = {}
@@ -4671,6 +4717,23 @@ app.get('/', (c) => {
         }
         
         const response = await axios.post(endpoint, requestBody)
+        
+        // 202 Accepted（処理中）の場合
+        if (response.status === 202) {
+          isProcessing = true
+          const data = response.data
+          document.querySelector('#rankings-loading p').textContent = 
+            data.message + ' 自動的に再試行します...'
+          
+          // retryAfter秒後に自動再試行
+          setTimeout(() => {
+            console.log('Retrying ranking request...')
+            loadRanking(type)
+          }, (data.retryAfter || 10) * 1000)
+          return
+        }
+        
+        // 200 OK（成功）の場合
         const data = response.data
         
         // 結果を表示
@@ -4688,7 +4751,10 @@ app.get('/', (c) => {
         \`
         document.getElementById('rankings-result').style.display = 'block'
       } finally {
-        document.getElementById('rankings-loading').style.display = 'none'
+        // 202（処理中）の場合はローディングを残す
+        if (!isProcessing) {
+          document.getElementById('rankings-loading').style.display = 'none'
+        }
       }
     }
     
