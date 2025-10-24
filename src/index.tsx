@@ -39,17 +39,25 @@ app.post('/api/analyze', async (c) => {
     }
     
     const env = c.env
+    
+    // 環境変数チェック
+    if (!env.ML_API_URL) {
+      console.error('[ERROR] ML_API_URL is not set in environment variables')
+    } else {
+      console.log(`[INFO] ML_API_URL: ${env.ML_API_URL}`)
+    }
+    
     const { cache } = await import('./services/cache')
     const cacheKey = `analysis:${symbol}:${trainModel}:${enableBackfit}`
     
     // キャッシュチェック
     const cached = cache.get(cacheKey)
     if (cached) {
-      console.log(`Returning cached analysis for ${symbol}`)
+      console.log(`[CACHE] Returning cached analysis for ${symbol}`)
       return c.json(cached)
     }
     
-    console.log(`Analyzing ${symbol} with trainModel=${trainModel}, enableBackfit=${enableBackfit}`)
+    console.log(`[ANALYZE] Analyzing ${symbol} with trainModel=${trainModel}, enableBackfit=${enableBackfit}`)
     
     // 並列でデータ取得
     const [
@@ -179,10 +187,12 @@ app.post('/api/analyze', async (c) => {
     return c.json(result)
     
   } catch (error: any) {
-    console.error('分析エラー:', error)
+    console.error('[ERROR] 分析エラー:', error)
+    console.error('[ERROR] Error stack:', error.stack)
     return c.json({ 
       error: '分析中にエラーが発生しました', 
-      details: error.message 
+      details: error.message,
+      stack: error.stack?.split('\n').slice(0, 3).join('\n') // First 3 lines of stack
     }, 500)
   }
 })
@@ -4747,6 +4757,7 @@ app.get('/', (c) => {
         const response = await axios.post(endpoint, requestBody)
         
         console.log('[API] Response received:', response.status, response.data)
+        console.log('[API] Rankings count:', response.data.rankings?.length || 0)
         
         // 202 Accepted（処理中）の場合
         if (response.status === 202) {
@@ -4765,6 +4776,24 @@ app.get('/', (c) => {
         
         // 200 OK（成功）の場合
         const data = response.data
+        
+        // 空の結果チェック
+        if (!data.rankings || data.rankings.length === 0) {
+          console.warn('[WARN] No rankings returned from API')
+          document.getElementById('rankings-result').innerHTML = \`
+            <div class="bg-yellow-50 border-l-4 border-yellow-500 p-6 rounded">
+              <p class="text-yellow-700">
+                <i class="fas fa-exclamation-circle mr-2"></i>
+                ランキング結果が0件でした。条件を満たす銘柄がありませんでした。
+              </p>
+              <p class="text-sm text-gray-600 mt-2">
+                分析銘柄数: \${data.metadata?.totalScanned || 0}銘柄
+              </p>
+            </div>
+          \`
+          document.getElementById('rankings-result').style.display = 'block'
+          return
+        }
         
         // 結果を表示
         displayRankingResults(type, data)
