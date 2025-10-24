@@ -4787,6 +4787,10 @@ app.get('/', (c) => {
       }
     }
     
+    // グローバルスコープに即座に公開
+    window.loadRanking = loadRanking
+    console.log('✅ loadRanking function registered to window')
+    
     // ランキング結果表示
     function displayRankingResults(type, data) {
       const resultsDiv = document.getElementById('rankings-result')
@@ -5054,9 +5058,9 @@ app.get('/', (c) => {
       }, 300)
     }
     
-    // グローバルスコープに関数を明示的に公開
-    window.loadRanking = loadRanking
+    // グローバルスコープに即座に公開
     window.analyzeStockFromRanking = analyzeStockFromRanking
+    console.log('✅ analyzeStockFromRanking function registered to window')
 
     // グローバルに分析データを保存（analyzeStock関数内で設定）
     // let currentAnalysisData = null  // 既にグローバルスコープで宣言済み
