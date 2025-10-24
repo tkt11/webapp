@@ -39,6 +39,16 @@ app.post('/api/analyze', async (c) => {
     }
     
     const env = c.env
+    const { cache } = await import('./services/cache')
+    const cacheKey = `analysis:${symbol}:${trainModel}:${enableBackfit}`
+    
+    // キャッシュチェック
+    const cached = cache.get(cacheKey)
+    if (cached) {
+      console.log(`Returning cached analysis for ${symbol}`)
+      return c.json(cached)
+    }
+    
     console.log(`Analyzing ${symbol} with trainModel=${trainModel}, enableBackfit=${enableBackfit}`)
     
     // 並列でデータ取得
@@ -137,7 +147,7 @@ app.post('/api/analyze', async (c) => {
       env.OPENAI_API_KEY
     )
     
-    return c.json({
+    const result = {
       symbol,
       current_price: currentPrice,
       prediction: {
@@ -160,7 +170,12 @@ app.post('/api/analyze', async (c) => {
         dates: stockData.dates.slice(-30),
         prices: stockData.prices.slice(-30)
       }
-    })
+    }
+    
+    // キャッシュに保存（30分）
+    cache.set(cacheKey, result, 30 * 60 * 1000)
+    
+    return c.json(result)
     
   } catch (error: any) {
     console.error('分析エラー:', error)
