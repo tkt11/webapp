@@ -96,10 +96,10 @@ export function performTechnicalAnalysis(prices: number[]): TechnicalAnalysis {
   // SMAクロスオーバー判定
   if (sma20 > sma50) {
     score += 20
-    signals.push('✅ ゴールデンクロス（短期MA > 長期MA）')
+    signals.push('[OK] ゴールデンクロス（短期MA > 長期MA）')
   } else if (sma20 < sma50) {
     score -= 20
-    signals.push('❌ デッドクロス（短期MA < 長期MA）')
+    signals.push('[ERROR] デッドクロス（短期MA < 長期MA）')
   } else {
     signals.push('⚪ 移動平均線は中立')
   }
@@ -107,10 +107,10 @@ export function performTechnicalAnalysis(prices: number[]): TechnicalAnalysis {
   // RSI判定
   if (rsi < 30) {
     score += 15
-    signals.push(`✅ RSI売られすぎ (${rsi.toFixed(1)})`)
+    signals.push(`[OK] RSI売られすぎ (${rsi.toFixed(1)})`)
   } else if (rsi > 70) {
     score -= 15
-    signals.push(`❌ RSI買われすぎ (${rsi.toFixed(1)})`)
+    signals.push(`[ERROR] RSI買われすぎ (${rsi.toFixed(1)})`)
   } else {
     signals.push(`⚪ RSI中立 (${rsi.toFixed(1)})`)
   }
@@ -118,19 +118,19 @@ export function performTechnicalAnalysis(prices: number[]): TechnicalAnalysis {
   // MACD判定
   if (macd.histogram > 0) {
     score += 15
-    signals.push('✅ MACD上昇トレンド')
+    signals.push('[OK] MACD上昇トレンド')
   } else if (macd.histogram < 0) {
     score -= 15
-    signals.push('❌ MACD下降トレンド')
+    signals.push('[ERROR] MACD下降トレンド')
   }
   
   // ボリンジャーバンド判定
   if (currentPrice < bollinger.lower) {
     score += 10
-    signals.push('✅ ボリンジャーバンド下限突破（買いシグナル）')
+    signals.push('[OK] ボリンジャーバンド下限突破（買いシグナル）')
   } else if (currentPrice > bollinger.upper) {
     score -= 10
-    signals.push('❌ ボリンジャーバンド上限突破（売りシグナル）')
+    signals.push('[ERROR] ボリンジャーバンド上限突破（売りシグナル）')
   }
   
   // スコアを0-100に正規化

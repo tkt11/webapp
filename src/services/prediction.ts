@@ -105,44 +105,44 @@ export function generatePrediction(
   
   // テクニカル分析からの理由
   if (technical.score >= 60) {
-    reasons.push(...technical.signals.filter(s => s.startsWith('✅')))
+    reasons.push(...technical.signals.filter(s => s.startsWith('[OK]')))
   } else if (technical.score <= 40) {
-    risks.push(...technical.signals.filter(s => s.startsWith('❌')))
+    risks.push(...technical.signals.filter(s => s.startsWith('[ERROR]')))
   }
   
   // ファンダメンタル分析からの理由
   if (fundamental.score >= 60) {
-    reasons.push(...fundamental.signals.filter(s => s.startsWith('✅')))
+    reasons.push(...fundamental.signals.filter(s => s.startsWith('[OK]')))
   } else if (fundamental.score <= 40) {
-    risks.push(...fundamental.signals.filter(s => s.startsWith('❌')))
+    risks.push(...fundamental.signals.filter(s => s.startsWith('[ERROR]')))
   }
   
   // センチメント分析からの理由
   if (sentiment.score >= 60) {
-    reasons.push(`✅ ポジティブなニュースセンチメント (${sentiment.news_count}件)`)
+    reasons.push(`[OK] ポジティブなニュースセンチメント (${sentiment.news_count}件)`)
   } else if (sentiment.score <= 40) {
-    risks.push(`❌ ネガティブなニュースセンチメント (${sentiment.news_count}件)`)
+    risks.push(`[ERROR] ネガティブなニュースセンチメント (${sentiment.news_count}件)`)
   }
   
   // マクロ経済からの理由
   if (macro.score >= 60) {
-    reasons.push(...macro.signals.filter(s => s.startsWith('✅')))
+    reasons.push(...macro.signals.filter(s => s.startsWith('[OK]')))
   } else if (macro.score <= 40) {
-    risks.push(...macro.signals.filter(s => s.startsWith('❌')))
+    risks.push(...macro.signals.filter(s => s.startsWith('[ERROR]')))
   }
   
   // アナリスト評価からの理由
   if (analyst.score >= 60 && analyst.consensus) {
-    reasons.push(`✅ アナリストコンセンサス: ${analyst.consensus}`)
+    reasons.push(`[OK] アナリストコンセンサス: ${analyst.consensus}`)
     if (analyst.upside && analyst.upside > 0) {
-      reasons.push(`✅ 目標株価まで ${analyst.upside.toFixed(1)}% の上値余地`)
+      reasons.push(`[OK] 目標株価まで ${analyst.upside.toFixed(1)}% の上値余地`)
     }
   } else if (analyst.score <= 40) {
     if (analyst.consensus === 'SELL') {
-      risks.push(`❌ アナリストコンセンサス: SELL`)
+      risks.push(`[ERROR] アナリストコンセンサス: SELL`)
     }
     if (analyst.upside && analyst.upside < 0) {
-      risks.push(`❌ 目標株価を ${Math.abs(analyst.upside).toFixed(1)}% 上回っている`)
+      risks.push(`[ERROR] 目標株価を ${Math.abs(analyst.upside).toFixed(1)}% 上回っている`)
     }
   }
   
@@ -457,35 +457,41 @@ export async function generateMLPrediction(
   fundamental: FundamentalAnalysis,
   sentiment: SentimentAnalysis,
   trainModel: boolean = false,
-  enableBackfit: boolean = false
+  enableBackfit: boolean = false,
+  mlApiUrl?: string
 ): Promise<{ prediction: MLPredictionResponse | null; training: MLTrainingResponse | null }> {
   try {
     let trainingResult: MLTrainingResponse | null = null;
 
     // 学習フラグがONの場合、モデルを学習
     if (trainModel) {
-      console.log(`Training custom model for ${symbol} (backfit: ${enableBackfit})...`);
+      console.log(`[ML] Training custom model for ${symbol} (backfit: ${enableBackfit})...`);
       trainingResult = await trainMLModel(
         symbol,
         historicalPrices,
         technical,
         fundamental,
         sentiment.score,
-        enableBackfit
+        enableBackfit,
+        mlApiUrl
       );
       
       if (!trainingResult) {
-        console.error('Training failed, falling back to generic model');
+        console.error('[ML] Training failed, falling back to generic model');
+      } else {
+        console.log(`[ML] Training succeeded! Model ID: ${trainingResult.model_id}`);
       }
     }
 
     // 予測実行
+    console.log(`[ML] Predicting for ${symbol}...`);
     const mlResult = await predictWithML(
       symbol,
       historicalPrices,
       technical,
       fundamental,
-      sentiment.score
+      sentiment.score,
+      mlApiUrl
     )
     
     // ML APIからデータが返ってきた場合、追加情報をモックデータで補完

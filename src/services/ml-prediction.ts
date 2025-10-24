@@ -3,8 +3,9 @@
  * Calls external LightGBM API for machine learning-based stock prediction
  */
 
-// 開発環境ではローカルML API、本番環境ではCloud Run ML API
-const ML_API_URL = 'http://localhost:8080';
+// ML API URLは環境変数から取得
+// Fallback to localhost for local development
+const DEFAULT_ML_API_URL = 'http://localhost:8080';
 
 export interface MLPredictionRequest {
   symbol: string;
@@ -140,9 +141,12 @@ export async function predictWithML(
   prices: number[],
   technicalData: any,
   fundamentalData: any,
-  sentimentScore: number
+  sentimentScore: number,
+  mlApiUrl?: string
 ): Promise<MLPredictionResponse | null> {
   try {
+    const apiUrl = mlApiUrl || DEFAULT_ML_API_URL;
+    
     // Prepare request data
     const requestData: MLPredictionRequest = {
       symbol,
@@ -155,8 +159,10 @@ export async function predictWithML(
       volume: prices.length > 0 ? 1000000 : undefined // Placeholder
     };
 
+    console.log(`[ML API] Calling ${apiUrl}/predict for ${symbol}...`);
+
     // Call ML API
-    const response = await fetch(`${ML_API_URL}/predict`, {
+    const response = await fetch(`${apiUrl}/predict`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -187,9 +193,12 @@ export async function trainMLModel(
   technicalData: any,
   fundamentalData: any,
   sentimentScore: number,
-  enableBackfit: boolean = false
+  enableBackfit: boolean = false,
+  mlApiUrl?: string
 ): Promise<MLTrainingResponse | null> {
   try {
+    const apiUrl = mlApiUrl || DEFAULT_ML_API_URL;
+    
     const requestData: MLPredictionRequest = {
       symbol,
       prices: prices.slice(-730), // Last 2 years for training
@@ -202,10 +211,11 @@ export async function trainMLModel(
       enable_backfit: enableBackfit
     };
 
-    console.log(`Training model for ${symbol} with ${requestData.prices.length} price points...`);
+    console.log(`[ML API] Training model for ${symbol} with ${requestData.prices.length} price points...`);
+    console.log(`[ML API] Calling ${apiUrl}/train...`);
 
     // Call ML API train endpoint
-    const response = await fetch(`${ML_API_URL}/train`, {
+    const response = await fetch(`${apiUrl}/train`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestData),
@@ -229,13 +239,15 @@ export async function trainMLModel(
 /**
  * Get ML API health status
  */
-export async function getMLAPIHealth(): Promise<{
+export async function getMLAPIHealth(mlApiUrl?: string): Promise<{
   status: string;
   model_loaded: boolean;
   requests_today: number;
 } | null> {
   try {
-    const response = await fetch(`${ML_API_URL}/health`);
+    const apiUrl = mlApiUrl || DEFAULT_ML_API_URL;
+    console.log(`[ML API] Checking health at ${apiUrl}/health...`);
+    const response = await fetch(`${apiUrl}/health`);
     if (!response.ok) return null;
     return await response.json();
   } catch (error) {

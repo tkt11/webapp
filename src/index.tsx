@@ -126,7 +126,8 @@ app.post('/api/analyze', async (c) => {
       fundamental,
       sentiment,
       trainModel,  // 学習フラグを渡す
-      enableBackfit  // バックフィット検証フラグを渡す
+      enableBackfit,  // バックフィット検証フラグを渡す
+      env.ML_API_URL  // ML API URLを環境変数から取得
     )
     
     // GPT-5による最終判断を生成（全データを統合分析）
@@ -1818,7 +1819,7 @@ app.get('/', (c) => {
                           <p class="text-xs text-gray-600 mt-2">
                             \${isMatch 
                               ? '✓ 統計予測とML予測が同じ方向性を示しています。信頼度が高い予測です。' 
-                              : '⚠️ 統計予測とML予測で方向性が異なります。慎重な判断を推奨します。'}
+                              : '[WARN] 統計予測とML予測で方向性が異なります。慎重な判断を推奨します。'}
                           </p>
                         \`;
                       })()}
@@ -2317,7 +2318,7 @@ app.get('/', (c) => {
                     \${Math.abs(data.prediction.ml_training.performance_metrics.generalization_gap) < 2 
                       ? '[OK] 優秀: 過学習なく汎化性能が高い' 
                       : Math.abs(data.prediction.ml_training.performance_metrics.generalization_gap) < 5 
-                      ? '⚠️ 注意: 若干の過学習の可能性' 
+                      ? '[WARN] 注意: 若干の過学習の可能性' 
                       : '[ERROR] 過学習: 学習データへの過適応が見られる'}
                   </p>
                 </div>
@@ -2436,7 +2437,7 @@ app.get('/', (c) => {
                 </div>
                 <div class="bg-white p-4 rounded-lg shadow border-l-4 border-yellow-500">
                   <p class="text-lg font-bold text-yellow-600 mb-2">信頼度 50-70%</p>
-                  <p class="text-sm text-gray-700">⚠️ <strong>慎重推奨:</strong> 慎重な判断を推奨</p>
+                  <p class="text-sm text-gray-700">[WARN] <strong>慎重推奨:</strong> 慎重な判断を推奨</p>
                   <p class="text-xs text-gray-500 mt-2">一部の次元でスコアにばらつきあり、追加分析を推奨</p>
                 </div>
                 <div class="bg-white p-4 rounded-lg shadow border-l-4 border-red-500">
@@ -2449,7 +2450,7 @@ app.get('/', (c) => {
                 <p class="text-sm font-bold mb-2">現在の信頼度: <span class="text-2xl \${data.prediction.confidence >= 70 ? 'text-green-600' : data.prediction.confidence >= 50 ? 'text-yellow-600' : 'text-red-600'}">\${data.prediction.confidence}%</span></p>
                 <p class="text-sm text-gray-700">
                   \${data.prediction.confidence >= 70 ? '[OK] この銘柄は高信頼度で投資推奨されます' : 
-                     data.prediction.confidence >= 50 ? '⚠️ この銘柄は慎重な判断が必要です' : 
+                     data.prediction.confidence >= 50 ? '[WARN] この銘柄は慎重な判断が必要です' : 
                      '[ERROR] この銘柄は現時点で投資を見送ることを推奨します'}
                 </p>
               </div>
@@ -2923,7 +2924,7 @@ app.get('/', (c) => {
                   <p class="text-sm opacity-90 mb-2">最終判定</p>
                   <p class="text-3xl font-bold">
                     \${data.prediction.gpt5_final_judgment.action}
-                    \${data.prediction.gpt5_final_judgment.action === 'BUY' ? '🚀' : data.prediction.gpt5_final_judgment.action === 'SELL' ? '⚠️' : '⏸️'}
+                    \${data.prediction.gpt5_final_judgment.action === 'BUY' ? '[ROCKET]' : data.prediction.gpt5_final_judgment.action === 'SELL' ? '[WARN]' : '⏸️'}
                   </p>
                 </div>
                 <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg">
@@ -2945,7 +2946,7 @@ app.get('/', (c) => {
                   </div>
                   <div class="text-right">
                     <span class="text-2xl">
-                      \${data.prediction.gpt5_final_judgment.agreement_with_statistical_model.agrees ? '✅' : '⚠️'}
+                      \${data.prediction.gpt5_final_judgment.agreement_with_statistical_model.agrees ? '[OK]' : '[WARN]'}
                     </span>
                     <p class="text-xs mt-1">
                       \${data.prediction.gpt5_final_judgment.agreement_with_statistical_model.agrees ? '一致' : '相違あり'}
@@ -3165,7 +3166,7 @@ app.get('/', (c) => {
                   </div>
                   <div class="bg-red-500 bg-opacity-20 p-3 rounded">
                     <div class="flex items-center justify-between mb-2">
-                      <p class="text-xs font-bold">⚠️ ワーストケース</p>
+                      <p class="text-xs font-bold">[WARN] ワーストケース</p>
                       <span class="text-xs bg-white bg-opacity-20 px-2 py-1 rounded">\${data.prediction.gpt5_final_judgment.scenario_analysis.worst_case.probability}%</span>
                     </div>
                     <p class="text-2xl font-bold mb-1">$\${data.prediction.gpt5_final_judgment.scenario_analysis.worst_case.price_target.toFixed(2)}</p>

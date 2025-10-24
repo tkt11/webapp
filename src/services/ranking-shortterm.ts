@@ -4,7 +4,7 @@
  * テクニカル分析のみでシグナル検出
  */
 
-import { NASDAQ_100_SYMBOLS } from './symbols'
+import { NASDAQ_100_SYMBOLS, DEMO_MODE, DEMO_SYMBOLS_LIMIT } from './symbols'
 import { cache, CACHE_TTL, generateCacheKey, getCachedData } from './cache'
 import { ShortTermScore, RankingResponse } from '../types'
 
@@ -29,42 +29,54 @@ export async function getShortTermRanking(
     }
   }
   
-  console.log('Starting short-term trading ranking...')
+  console.log('[SHORT-TERM] Starting short-term trading ranking...')
   
-  // 全銘柄をテクニカル分析
+  // DEMO_MODE: 5銘柄に制限（Cloudflare Workers 30秒タイムアウト対策）
+  const symbolsToAnalyze = DEMO_MODE 
+    ? NASDAQ_100_SYMBOLS.slice(0, DEMO_SYMBOLS_LIMIT)
+    : NASDAQ_100_SYMBOLS
+  
+  console.log(`[SHORT-TERM] Analyzing ${symbolsToAnalyze.length} symbols (DEMO_MODE: ${DEMO_MODE})`)
+  
+  // 全銘柄をテクニカル分析（並列処理）
   const analyses: ShortTermScore[] = []
   
-  // バッチ処理（70銘柄ずつ）
-  const batchSize = 70
-  for (let i = 0; i < NASDAQ_100_SYMBOLS.length; i += batchSize) {
-    const batch = NASDAQ_100_SYMBOLS.slice(i, i + batchSize)
-    
-    const batchResults = await Promise.all(
-      batch.map(symbol => analyzeShortTerm(symbol, apiKeys))
+  // DEMO_MODEではバッチ処理不要（5銘柄のみなので並列実行）
+  if (DEMO_MODE) {
+    const results = await Promise.all(
+      symbolsToAnalyze.map(symbol => analyzeShortTerm(symbol, apiKeys))
     )
-    
-    analyses.push(...batchResults.filter(r => r !== null) as ShortTermScore[])
-    
-    // レート制限対策
-    if (i + batchSize < NASDAQ_100_SYMBOLS.length) {
-      await sleep(60000)
+    analyses.push(...results.filter(r => r !== null) as ShortTermScore[])
+  } else {
+    // 本番モード: バッチ処理（70銘柄ずつ）
+    const batchSize = 70
+    for (let i = 0; i < symbolsToAnalyze.length; i += batchSize) {
+      const batch = symbolsToAnalyze.slice(i, i + batchSize)
+      
+      const batchResults = await Promise.all(
+        batch.map(symbol => analyzeShortTerm(symbol, apiKeys))
+      )
+      
+      analyses.push(...batchResults.filter(r => r !== null) as ShortTermScore[])
+      
+      // レート制限対策（本番モードのみ）
+      if (i + batchSize < symbolsToAnalyze.length) {
+        await sleep(60000)
+      }
     }
   }
   
-  // フィルタリング + ランキング
+  console.log(`[SHORT-TERM] Analyzed ${analyses.length} symbols successfully`)
+  
+  // フィルタリング + ランキング（注目株と同じロジックでフィルタリングを緩和）
   const ranked = analyses
-    .filter(a => 
-      a.volatility >= 20 && 
-      a.volatility <= 50 &&
-      a.entryTiming !== 'AVOID'
-    )
     .sort((a, b) => b.totalScore - a.totalScore)
-    .slice(0, 10)
+    .slice(0, 10)  // フィルタリングなしでTop10を取得
   
   const result: RankingResponse<ShortTermScore> = {
     rankings: ranked,
     metadata: {
-      totalScanned: NASDAQ_100_SYMBOLS.length,
+      totalScanned: symbolsToAnalyze.length,
       timestamp: new Date().toISOString(),
       cacheHit: false,
       executionTime: Date.now() - startTime
@@ -74,7 +86,7 @@ export async function getShortTermRanking(
   // キャッシュに保存
   cache.set(cacheKey, result, CACHE_TTL.RANKING_SHORT_TERM)
   
-  console.log(`Short-term ranking completed: ${ranked.length} symbols`)
+  console.log(`[SHORT-TERM] Ranking completed: ${ranked.length} symbols`)
   return result
 }
 

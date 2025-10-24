@@ -7,9 +7,9 @@
  * 最終更新: 2025-10-23
  */
 
-// デモ用: 5銘柄に制限（Cloudflare Workers 30秒タイムアウト対策）
+// デモ用: 10銘柄に制限（Cloudflare Workers 30秒タイムアウト対策）
 export const DEMO_MODE = true
-export const DEMO_SYMBOLS_LIMIT = 5
+export const DEMO_SYMBOLS_LIMIT = 10
 
 export const NASDAQ_100_SYMBOLS = [
   // メガキャップテクノロジー
