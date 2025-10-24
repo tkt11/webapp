@@ -88,9 +88,9 @@ async function analyzeLightweight(
     
     const analysis: LightAnalysis = {
       symbol,
-      technicalScore: technical,
-      fundamentalScore: fundamental,
-      sentimentScore: sentiment,
+      technicalScore: technical || 50,
+      fundamentalScore: fundamental || 50,
+      sentimentScore: sentiment || 50,
       preliminaryScore,
       currentPrice: quote.price
     }

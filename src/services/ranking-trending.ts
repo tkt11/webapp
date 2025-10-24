@@ -99,19 +99,24 @@ async function analyzeTrending(
         return null
       }
       
+      // null値をデフォルト値50に置き換え
+      const safeNews = news || 50
+      const safeAnalyst = analyst || 50
+      const safeFundamental = fundamental || 50
+      
       // ソーシャルスコア（簡易版：ニュースの半分）
-      const socialScore = news / 2
+      const socialScore = safeNews / 2
       
       // 検索トレンドスコア（未実装：デフォルト50）
       const searchScore = 50
       
       // 総合スコア
       const totalScore = (
-        news * 0.30 +
+        safeNews * 0.30 +
         socialScore * 0.25 +
         searchScore * 0.20 +
-        analyst * 0.15 +
-        fundamental * 0.10
+        safeAnalyst * 0.15 +
+        safeFundamental * 0.10
       )
       
       // トレンド理由生成
@@ -124,11 +129,11 @@ async function analyzeTrending(
       return {
         symbol,
         currentPrice: quote,
-        newsScore: news,
+        newsScore: safeNews,
         socialScore,
         searchScore,
-        analystScore: analyst,
-        fundamentalGrowth: fundamental,
+        analystScore: safeAnalyst,
+        fundamentalGrowth: safeFundamental,
         totalScore,
         trendReason: reasons.join(' / ') || '総合的に注目度上昇'
       }
