@@ -387,17 +387,38 @@ app.post('/api/rankings/high-growth', async (c) => {
   try {
     const { env } = c
     const { timeframe = '90d' } = await c.req.json()
+    const { cache } = await import('./services/cache')
+    const cacheKey = `ranking:high-growth:${timeframe}`
     
+    // キャッシュチェック
+    const cached = cache.get(cacheKey)
+    if (cached) {
+      console.log(`Returning cached high-growth ranking for ${timeframe} (fast path)`)
+      return c.json(cached)
+    }
+    
+    // キャッシュなし → バックグラウンドで生成開始
+    console.log(`No cache, starting background generation for ${timeframe}...`)
     const { getHighGrowthRanking } = await import('./services/ranking-highgrowth')
     
-    const result = await getHighGrowthRanking(timeframe, {
-      alphaVantage: env.ALPHA_VANTAGE_API_KEY,
-      finnhub: env.FINNHUB_API_KEY,
-      openai: env.OPENAI_API_KEY,
-      fred: env.FRED_API_KEY
-    })
+    // バックグラウンドでランキング生成（GPT-5-miniを使うため時間がかかる）
+    c.executionCtx.waitUntil(
+      getHighGrowthRanking(timeframe, {
+        alphaVantage: env.ALPHA_VANTAGE_API_KEY,
+        finnhub: env.FINNHUB_API_KEY,
+        openai: env.OPENAI_API_KEY,
+        fred: env.FRED_API_KEY
+      }).catch(err => {
+        console.error('Background high-growth ranking generation failed:', err)
+      })
+    )
     
-    return c.json(result)
+    // すぐに202 Acceptedを返す（GPT-5-mini処理は3-5分かかるため）
+    return c.json({
+      status: 'processing',
+      message: '高成長×信頼度ランキングを生成中です。GPT-5-miniで深堀り分析を実行中（約30秒後に再試行してください）',
+      retryAfter: 30
+    }, 202)
   } catch (error: any) {
     console.error('High-growth ranking error:', error)
     return c.json({
@@ -411,14 +432,36 @@ app.post('/api/rankings/high-growth', async (c) => {
 app.post('/api/rankings/short-term', async (c) => {
   try {
     const { env } = c
+    const { cache } = await import('./services/cache')
+    const cacheKey = 'ranking:short-term'
+    
+    // キャッシュチェック
+    const cached = cache.get(cacheKey)
+    if (cached) {
+      console.log('Returning cached short-term ranking (fast path)')
+      return c.json(cached)
+    }
+    
+    // キャッシュなし → バックグラウンドで生成開始
+    console.log('No cache, starting background generation...')
     const { getShortTermRanking } = await import('./services/ranking-shortterm')
     
-    const result = await getShortTermRanking({
-      alphaVantage: env.ALPHA_VANTAGE_API_KEY,
-      finnhub: env.FINNHUB_API_KEY
-    })
+    // バックグラウンドでランキング生成
+    c.executionCtx.waitUntil(
+      getShortTermRanking({
+        alphaVantage: env.ALPHA_VANTAGE_API_KEY,
+        finnhub: env.FINNHUB_API_KEY
+      }).catch(err => {
+        console.error('Background ranking generation failed:', err)
+      })
+    )
     
-    return c.json(result)
+    // すぐに202 Acceptedを返す
+    return c.json({
+      status: 'processing',
+      message: 'ランキングを生成中です。10秒後に再度お試しください。',
+      retryAfter: 10
+    }, 202)
   } catch (error: any) {
     console.error('Short-term ranking error:', error)
     return c.json({
