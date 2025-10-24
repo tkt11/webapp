@@ -29,8 +29,8 @@ export async function lightweightScreening(
   
   const results: LightAnalysis[] = []
   
-  // レート制限対策: 70銘柄ずつバッチ処理（デモモードでは10銘柄）
-  const batchSize = DEMO_MODE ? 10 : 70
+  // レート制限対策: 70銘柄ずつバッチ処理（デモモードでは一括処理）
+  const batchSize = DEMO_MODE ? symbols.length : 70
   for (let i = 0; i < symbols.length; i += batchSize) {
     const batch = symbols.slice(i, i + batchSize)
     
@@ -41,7 +41,8 @@ export async function lightweightScreening(
     results.push(...batchResults.filter(r => r !== null) as LightAnalysis[])
     
     // 次のバッチまで1分待機（Alpha Vantage: 75 req/min）
-    if (i + batchSize < symbols.length) {
+    // デモモードではスキップ
+    if (!DEMO_MODE && i + batchSize < symbols.length) {
       console.log(`Completed ${i + batchSize}/${symbols.length}, waiting 60s...`)
       await sleep(60000)
     }
