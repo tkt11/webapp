@@ -4686,6 +4686,8 @@ app.get('/', (c) => {
     
     // ランキング読み込み
     async function loadRanking(type) {
+      console.log(`🎯 loadRanking called with type: ${type}`)
+      
       // すべてのランキングボタンをリセット
       document.querySelectorAll('#rankings-tab button').forEach(btn => {
         btn.classList.remove('bg-blue-600', 'text-white')
@@ -4738,7 +4740,12 @@ app.get('/', (c) => {
             break
         }
         
+        console.log(`📡 Sending POST request to: ${endpoint}`)
+        console.log(`📦 Request body:`, requestBody)
+        
         const response = await axios.post(endpoint, requestBody)
+        
+        console.log(`✅ Response received:`, response.status, response.data)
         
         // 202 Accepted（処理中）の場合
         if (response.status === 202) {
@@ -5046,6 +5053,10 @@ app.get('/', (c) => {
         analyzeStock()
       }, 300)
     }
+    
+    // グローバルスコープに関数を明示的に公開
+    window.loadRanking = loadRanking
+    window.analyzeStockFromRanking = analyzeStockFromRanking
 
     // グローバルに分析データを保存（analyzeStock関数内で設定）
     // let currentAnalysisData = null  // 既にグローバルスコープで宣言済み
@@ -5086,6 +5097,8 @@ app.get('/', (c) => {
       // Test switchTab function
       console.log('%c Testing switchTab function:', 'color: #f59e0b; font-weight: bold;')
       console.log('  - switchTab function exists:', typeof window.switchTab !== 'undefined')
+      console.log('  - loadRanking function exists:', typeof window.loadRanking !== 'undefined')
+      console.log('  - analyzeStockFromRanking function exists:', typeof window.analyzeStockFromRanking !== 'undefined')
     })
   </script>
 </body>
