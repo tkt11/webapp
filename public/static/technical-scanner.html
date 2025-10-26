@@ -205,7 +205,8 @@
         console.log('[CALL] /api/technical-analysis')
         const technicalResponse = await axios.post(`${ML_API_URL}/api/technical-analysis`, {
           symbol: symbol,
-          api_key: apiKey
+          alpha_vantage_api_key: apiKey,
+          mode: 'both'
         })
         
         console.log('[RESPONSE] Technical analysis:', technicalResponse.data)
@@ -219,7 +220,7 @@
           console.log('[CALL] /api/technical-ml-predict')
           const mlResponse = await axios.post(`${ML_API_URL}/api/technical-ml-predict`, {
             symbol: symbol,
-            api_key: apiKey,
+            alpha_vantage_api_key: apiKey,
             enable_backfit: enableBackfit,
             force_retrain: false
           })
