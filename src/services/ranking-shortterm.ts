@@ -112,8 +112,23 @@ async function analyzeShortTerm(
       )
       const dailyData = await dailyResponse.json()
       
+      // APIレスポンスをログ出力
+      console.log(`[SHORT-TERM] ${symbol} API response keys:`, Object.keys(dailyData))
+      
+      // エラーメッセージチェック
+      if (dailyData['Error Message']) {
+        console.error(`[SHORT-TERM] ${symbol} API Error: ${dailyData['Error Message']}`)
+        return null
+      }
+      
+      // レート制限チェック
+      if (dailyData['Note']) {
+        console.warn(`[SHORT-TERM] ${symbol} Rate limited: ${dailyData['Note']}`)
+        return null
+      }
+      
       if (!dailyData['Time Series (Daily)']) {
-        console.warn(`[SHORT-TERM] No daily data for ${symbol}`)
+        console.warn(`[SHORT-TERM] ${symbol} No daily data available`)
         return null
       }
       

@@ -48,11 +48,33 @@ export async function fetchStockPrices(symbol: string, apiKey: string): Promise<
   // outputsize=full で最大20年分のデータを取得（学習用に十分なデータ確保）
   const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&apikey=${apiKey}&outputsize=full`
   
+  console.log(`[API] Fetching stock prices for ${symbol}...`)
   const response = await fetch(url)
   const data = await response.json() as AlphaVantageResponse
   
+  console.log(`[API] Alpha Vantage response keys:`, Object.keys(data))
+  
+  // エラーメッセージチェック
+  if (data['Error Message']) {
+    console.error(`[API] Alpha Vantage error:`, data['Error Message'])
+    throw new Error(`Alpha Vantage API error: ${data['Error Message']}`)
+  }
+  
+  // レート制限チェック
+  if (data['Note']) {
+    console.error(`[API] Alpha Vantage rate limit:`, data['Note'])
+    throw new Error(`Alpha Vantage rate limit exceeded. Please try again later.`)
+  }
+  
+  // 情報メッセージチェック
+  if (data['Information']) {
+    console.error(`[API] Alpha Vantage info:`, data['Information'])
+    throw new Error(`Alpha Vantage: ${data['Information']}`)
+  }
+  
   if (!data['Time Series (Daily)']) {
-    throw new Error('株価データの取得に失敗しました')
+    console.error(`[API] No time series data found. Response:`, JSON.stringify(data).substring(0, 500))
+    throw new Error(`株価データの取得に失敗しました。APIレスポンス: ${JSON.stringify(Object.keys(data))}`)
   }
   
   const timeSeries = data['Time Series (Daily)']
@@ -60,7 +82,7 @@ export async function fetchStockPrices(symbol: string, apiKey: string): Promise<
   const dates = Object.keys(timeSeries).sort().slice(-730)
   const prices = dates.map(date => parseFloat(timeSeries[date]['4. close']))
   
-  console.log(`Fetched ${prices.length} days of price data for ${symbol}`);
+  console.log(`[API] Fetched ${prices.length} days of price data for ${symbol}`);
   
   return {
     prices,
