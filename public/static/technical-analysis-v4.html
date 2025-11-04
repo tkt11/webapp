@@ -588,7 +588,8 @@
       const future = data.future_predictions
       const backfit = data.training.backfit_predictions
       const featureImportances = data.training.feature_importances
-      const current_price = future && future.predictions && future.predictions.length > 0 ? future.predictions[0] : 0
+      // 現在価格を正しく取得（future_predictions.current_priceまたはdata.current_price）
+      const current_price = data.current_price || future?.current_price || 0
       
       const html = `
         <div class="bg-gradient-to-r from-green-50 to-teal-50 p-6 rounded-lg mb-6">
@@ -717,7 +718,7 @@
       
       // チャート描画
       if (future && future.predictions) {
-        renderFuturePredictionChart(future, future.predictions[0])
+        renderFuturePredictionChart(future, current_price)
       }
       if (backfit) {
         renderBackfitChart(backfit)
