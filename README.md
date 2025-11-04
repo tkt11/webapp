@@ -124,7 +124,23 @@
 
 ## 🚀 デモURL
 
-**公開URL**: https://3000-i1j5rforwq1dklhedain9-2e77fc33.sandbox.novita.ai
+### 1. Stock AI Predictor (メインアプリ)
+**公開URL**: https://3000-i9d0tkecfwkjzyd8gq3r1-a402f90a.sandbox.novita.ai
+- 機能: 銘柄分析、おすすめTOP10、投資シミュレーター、バックテスト、NASDAQ-100ランキング
+
+### 2. テクニカル分析スクリーナー v4.0 (System A/B/C統合版) 🆕
+**公開URL**: https://3000-i9d0tkecfwkjzyd8gq3r1-a402f90a.sandbox.novita.ai/static/technical-analysis-v4
+- 機能: System A（シンプル5指標）、System B（高度な20+指標）、System C（ML予測125特徴量）
+- ナビゲーション: 📊 テクニカル分析スクリーナー ⇄ 🏆 NASDAQ-100ランキング
+
+### 3. NASDAQ-100ランキング (独立版) 🆕
+**公開URL**: https://3000-i9d0tkecfwkjzyd8gq3r1-a402f90a.sandbox.novita.ai/static/nasdaq-ranking
+- 機能: NASDAQ-100全銘柄をSystem A/Bでスクリーニング、TOP 30表示
+- ナビゲーション: 📊 テクニカル分析スクリーナー ⇄ 🏆 NASDAQ-100ランキング
+
+### 4. ML API (バックエンド)
+**公開URL**: https://8080-i9d0tkecfwkjzyd8gq3r1-a402f90a.sandbox.novita.ai
+- エンドポイント: `/api/technical-analysis`, `/api/system-c-predict`, `/api/technical-ml-predict`
 
 ### 動作確認済みの銘柄例
 - **AAPL** (Apple) - 判定: BUY、スコア: 69/100 ✅ 詳細モーダル動作確認済み
@@ -165,14 +181,38 @@
 - **Cloudflare Pages**: エッジデプロイ
 - **PM2**: プロセス管理（開発環境）
 
+## 🛠️ サービス構成
+
+### 起動中のサービス
+
+| サービス名 | ポート | 状態 | 機能 |
+|-----------|--------|------|------|
+| stock-ai-predictor | 3000 | ✅ Online | メインWebアプリ（NASDAQ-100ランキング統合） |
+| ml-api | 8080 | ✅ Online | ML APIバックエンド（System A/B/C） |
+
+### アクセスポイント
+
+1. **Stock AI Predictor**（メインアプリ）
+   - URL: `https://3000-i9d0tkecfwkjzyd8gq3r1-a402f90a.sandbox.novita.ai/`
+   - 機能: 銘柄分析、おすすめTOP10、NASDAQ-100ランキング、投資シミュレーター、バックテスト
+
+2. **テクニカル分析スクリーナー**（System A/B/C）
+   - URL: `https://3000-i9d0tkecfwkjzyd8gq3r1-a402f90a.sandbox.novita.ai/static/technical-scanner`
+   - 機能: System A（シンプル5指標）、System B（高度な20+指標）、System C（ML予測125特徴量）
+
+3. **ML API**（バックエンド）
+   - URL: `https://8080-i9d0tkecfwkjzyd8gq3r1-a402f90a.sandbox.novita.ai/`
+   - エンドポイント: `/api/technical-analysis`, `/api/system-c-predict`, `/api/technical-ml-predict`
+
 ## 📁 プロジェクト構造
 
 ```
-webapp/
-├── src/
-│   ├── index.tsx              # メインアプリ + API routes + UI
-│   ├── types.ts               # TypeScript型定義
-│   └── services/
+/home/user/
+├── webapp/                    # メインWebアプリケーション
+│   ├── src/
+│   │   ├── index.tsx          # メインアプリ + API routes + UI
+│   │   ├── types.ts           # TypeScript型定義
+│   │   └── services/
 │       ├── technical.ts       # テクニカル分析エンジン
 │       ├── fundamental.ts     # ファンダメンタル分析エンジン
 │       ├── sentiment.ts       # センチメント分析（GPT-4o）
@@ -188,12 +228,17 @@ webapp/
 │       ├── ranking-highgrowth.ts    # ✨ 高成長×信頼度ランキング (v14.0)
 │       ├── ranking-shortterm.ts     # ✨ 短期トレードランキング (v14.0)
 │       └── ranking-trending.ts      # ✨ 注目株ランキング (v14.0)
-├── ml_api/
-│   ├── main.py                # FastAPI + LightGBM ML エンジン
-│   ├── requirements.txt       # Python依存関係
-│   └── ecosystem.config.cjs   # PM2設定（ML API）
-├── dist/                      # ビルド出力
-├── ecosystem.config.cjs       # PM2設定（メインアプリ）
+│   ├── public/static/
+│   │   └── technical-scanner.html   # System A/B/C統合版テクニカル分析ツール
+│   ├── dist/                  # ビルド出力
+│   └── ecosystem.config.cjs   # PM2設定（メインアプリ）
+│
+└── ml-api/                    # ML APIバックエンド（System A/B/C対応）
+    ├── main.py                # FastAPI + LightGBM ML エンジン
+    ├── technical_scoring_advanced.py  # System B高度分析
+    ├── alpha_vantage_client.py        # Alpha Vantageクライアント
+    ├── requirements.txt       # Python依存関係
+    └── ecosystem.config.cjs   # PM2設定（ML API）
 ├── wrangler.jsonc             # Cloudflare Pages設定
 ├── package.json               # 依存関係 + scripts
 ├── .dev.vars                  # 環境変数（ローカル開発）

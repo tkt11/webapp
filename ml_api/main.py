@@ -1,115 +1,56 @@
 """
-Stock Prediction ML API using LightGBM
-FastAPI + LightGBM for stock price prediction
+Stock Price Prediction ML API
+FastAPI + LightGBM for stock price forecasting
 """
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
-import lightgbm as lgb
+from pydantic import BaseModel
+from typing import Optional, List
 import numpy as np
 import pandas as pd
-from datetime import datetime
-import os
-import json
-import tempfile
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from datetime import datetime, timedelta
+import lightgbm as lgb
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+import hashlib
+import time
+import logging
 
-# Initialize FastAPI
-app = FastAPI(
-    title="Stock Prediction ML API",
-    description="LightGBM-based stock price prediction service",
-    version="1.0.0"
-)
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# CORS設定
+app = FastAPI(title="Stock ML API", version="2.0.0")
+
+# CORS configuration for Cloudflare Pages
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 本番環境では特定のドメインに制限
+    allow_origins=["*"],  # In production, specify your Cloudflare Pages domain
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# リクエストカウンター(簡易版)
-request_counter = {
-    "daily": 0,
-    "total": 0,
-    "last_reset": datetime.now().date()
-}
+# Global cache for trained models
+MODEL_CACHE = {}
+MAX_CACHE_SIZE = 100
+REQUEST_COUNT = 0
 
-# モデルキャッシュ（銘柄ごとに学習済みモデルと学習結果を保持）
-# {symbol: {"model": lgb.Booster, "feature_names": List[str], "training_response": Dict, "timestamp": datetime}}
-model_cache: Dict[str, Dict] = {}
 
-# モデルの初期化(ダミーモデル - 本番では事前学習済みモデルをロード)
-# 実際のプロダクション環境では、事前に学習したモデルをファイルから読み込む
-model = None
+class MLPredictionRequest(BaseModel):
+    symbol: str
+    prices: List[float]
+    rsi: Optional[float] = None
+    macd: Optional[float] = None
+    sentiment_score: Optional[float] = None
+    pe_ratio: Optional[float] = None
+    roe: Optional[float] = None
+    volume: Optional[float] = None
+    enable_backfit: Optional[bool] = False
 
-def initialize_model():
-    """Initialize or load pre-trained LightGBM model"""
-    global model
-    # ダミーモデルの作成(デモ用)
-    # 実際には、事前に学習したモデルを model.txt から読み込む
-    # model = lgb.Booster(model_file='model.txt')
-    
-    # デモ用: ランダムな予測を返すダミー実装
-    # 実際の実装では、ここで学習済みモデルをロード
-    pass
 
-def get_cached_model(symbol: str):
-    """Get cached model and training results for a symbol if available"""
-    if symbol in model_cache:
-        cached = model_cache[symbol]
-        # キャッシュが7日以内なら有効
-        if (datetime.now() - cached["timestamp"]).days < 7:
-            print(f"📦 Using cached model for {symbol} (age: {(datetime.now() - cached['timestamp']).seconds}s)")
-            return cached["model"], cached["feature_names"], cached.get("training_response")
-    return None, None, None
-
-def cache_model(symbol: str, model: lgb.Booster, feature_names: List[str], training_response: Optional[Dict] = None):
-    """Cache a trained model and training results for a symbol"""
-    model_cache[symbol] = {
-        "model": model,
-        "feature_names": feature_names,
-        "training_response": training_response,
-        "timestamp": datetime.now()
-    }
-    print(f"💾 Cached model for {symbol}")
-
-initialize_model()
-
-# リクエストモデル
-class PredictionRequest(BaseModel):
-    """Stock prediction request schema"""
-    symbol: str = Field(..., description="Stock symbol (e.g., AAPL)")
-    prices: List[float] = Field(..., description="Historical prices (10-1000 days)", min_items=10, max_items=1000)
-    rsi: Optional[float] = Field(50.0, ge=0, le=100, description="RSI indicator")
-    macd: Optional[float] = Field(0.0, description="MACD value")
-    sentiment_score: Optional[float] = Field(50.0, ge=0, le=100, description="Sentiment score")
-    pe_ratio: Optional[float] = Field(None, description="P/E ratio")
-    roe: Optional[float] = Field(None, description="ROE percentage")
-    volume: Optional[float] = Field(None, description="Trading volume")
-    enable_backfit: Optional[bool] = Field(False, description="Enable backfit validation (trains separate model)")
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "symbol": "AAPL",
-                "prices": [150.0, 151.2, 149.8, 152.3, 153.1],
-                "rsi": 65.5,
-                "macd": 1.23,
-                "sentiment_score": 72.5,
-                "pe_ratio": 28.5,
-                "roe": 15.3,
-                "volume": 50000000
-            }
-        }
-
-# レスポンスモデル
-class PredictionResponse(BaseModel):
-    """Prediction response schema"""
+class MLPredictionResponse(BaseModel):
     symbol: str
     predicted_price: float
     confidence: float
@@ -117,730 +58,692 @@ class PredictionResponse(BaseModel):
     model: str
     features_used: int
     timestamp: str
-    ml_prediction: Optional[Dict[str, Any]] = None  # ML予測データ（キャッシュモデル使用時）
-    ml_training: Optional[Dict[str, Any]] = None  # ML学習結果（キャッシュされた学習データ）
-    future_predictions: Optional['FuturePrediction'] = None  # 未来30日予測
-    backfit_predictions: Optional['BackfitPrediction'] = None  # 過去30日バックフィット予測
+    feature_importances: Optional[List[dict]] = None
+    model_metrics: Optional[dict] = None
+    training_info: Optional[dict] = None
+    ml_training: Optional[dict] = None
 
-# トレーニングレスポンスモデル
-class TrainingDataInfo(BaseModel):
-    """Training data information"""
-    total_samples: int
-    train_samples: int
-    test_samples: int
-    features_count: int
-    date_range_start: Optional[str] = None
-    date_range_end: Optional[str] = None
 
-class Hyperparameters(BaseModel):
-    """Model hyperparameters"""
-    objective: str
-    boosting_type: str
-    num_leaves: int
-    learning_rate: float
-    max_depth: int
-    min_data_in_leaf: int
-    feature_fraction: float
-    bagging_fraction: float
-    bagging_freq: int
-    num_boost_round: int
-
-class LearningCurves(BaseModel):
-    """Learning curves data"""
-    iterations: List[int]
-    train_loss: List[float]
-    val_loss: List[float]
-
-class PerformanceMetrics(BaseModel):
-    """Training and test performance metrics"""
-    train_rmse: float
-    test_rmse: float
-    train_mae: float
-    test_mae: float
-    train_r2: float
-    test_r2: float
-    generalization_gap: float  # test_loss - train_loss
-
-class FeatureImportance(BaseModel):
-    """Feature importance data"""
-    feature: str
-    importance: float
-
-class FuturePrediction(BaseModel):
-    """Future price predictions"""
-    dates: List[str]
-    predictions: List[float]
-    lower_bound: List[float]
-    upper_bound: List[float]
-
-class BackfitPrediction(BaseModel):
-    """Backfit predictions for past 30 days"""
-    dates: List[str]
-    predictions: List[float]
-    actual_prices: List[float]
-    rmse: float
-    mae: float
-    direction_accuracy: float
-
-class TrainingResponse(BaseModel):
-    """Training response with detailed information"""
-    success: bool
-    model_id: str
+class MLTrainingResponse(BaseModel):
     symbol: str
-    training_data: TrainingDataInfo
-    hyperparameters: Hyperparameters
-    learning_curves: LearningCurves
-    performance_metrics: PerformanceMetrics
-    feature_importances: List[FeatureImportance]
-    training_duration: float  # seconds
-    timestamp: str
-    message: str
-    future_predictions: Optional[FuturePrediction] = None  # 未来30日予測
-    backfit_predictions: Optional[BackfitPrediction] = None  # 過去30日バックフィット
+    model_id: str
+    training_duration: float
+    accuracy_metrics: dict
+    feature_importance: List[dict]
+    backfit_validation: Optional[dict] = None
 
-class HealthResponse(BaseModel):
-    """Health check response"""
-    status: str
-    model_loaded: bool
-    requests_today: int
-    uptime: str
 
-# エンドポイント
-@app.get("/", response_model=dict)
-async def root():
-    """Root endpoint"""
-    return {
-        "service": "Stock Prediction ML API",
-        "version": "1.0.0",
-        "status": "running",
-        "endpoints": {
-            "predict": "/predict",
-            "health": "/health",
-            "docs": "/docs"
-        }
+def create_features(prices: List[float], rsi: float = None, macd: float = None, 
+                   sentiment: float = None, pe_ratio: float = None, roe: float = None) -> pd.DataFrame:
+    """Create feature matrix from price history and indicators"""
+    
+    prices_array = np.array(prices)
+    
+    # Technical features
+    features = {
+        'close': prices_array[-1],
+        'sma_5': np.mean(prices_array[-5:]) if len(prices_array) >= 5 else prices_array[-1],
+        'sma_20': np.mean(prices_array[-20:]) if len(prices_array) >= 20 else prices_array[-1],
+        'sma_50': np.mean(prices_array[-50:]) if len(prices_array) >= 50 else prices_array[-1],
+        'volatility': np.std(prices_array[-30:]) if len(prices_array) >= 30 else 0,
+        'momentum_7d': ((prices_array[-1] - prices_array[-7]) / prices_array[-7] * 100) if len(prices_array) >= 7 else 0,
+        'momentum_14d': ((prices_array[-1] - prices_array[-14]) / prices_array[-14] * 100) if len(prices_array) >= 14 else 0,
+        'price_range_30d': (np.max(prices_array[-30:]) - np.min(prices_array[-30:])) if len(prices_array) >= 30 else 0,
     }
+    
+    # Add optional indicators
+    if rsi is not None:
+        features['rsi'] = rsi
+    if macd is not None:
+        features['macd'] = macd
+    if sentiment is not None:
+        features['sentiment_score'] = sentiment
+    if pe_ratio is not None:
+        features['pe_ratio'] = pe_ratio
+    if roe is not None:
+        features['roe'] = roe
+    
+    return pd.DataFrame([features])
 
-@app.get("/health", response_model=HealthResponse)
-async def health_check():
-    """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "model_loaded": model is not None or True,  # デモ用
-        "requests_today": request_counter["daily"],
-        "uptime": "running"
-    }
 
-@app.post("/predict", response_model=PredictionResponse)
-async def predict(request: Request, data: PredictionRequest):
-    """
-    Predict stock price using LightGBM model
+def prepare_training_data(prices: List[float], lookback: int = 30, horizon: int = 1) -> tuple:
+    """Prepare training data with sliding window approach"""
     
-    - **symbol**: Stock ticker symbol
-    - **prices**: Historical price data (10-100 days)
-    - **rsi**: RSI technical indicator
-    - **macd**: MACD technical indicator
-    - **sentiment_score**: News sentiment score (0-100)
-    - **pe_ratio**: Price-to-Earnings ratio
-    - **roe**: Return on Equity percentage
-    - **volume**: Trading volume
-    """
+    prices_array = np.array(prices)
+    X, y = [], []
     
-    # デイリーリミットチェック
-    current_date = datetime.now().date()
-    if request_counter["last_reset"] != current_date:
-        request_counter["daily"] = 0
-        request_counter["last_reset"] = current_date
-    
-    if request_counter["daily"] >= 1000:
-        raise HTTPException(
-            status_code=429,
-            detail="Daily request limit exceeded (1000 requests/day)"
-        )
-    
-    try:
-        # キャッシュされたモデルと学習結果を取得
-        cached_model, cached_feature_names, cached_training = get_cached_model(data.symbol)
-        
-        # 特徴量エンジニアリング
-        prices = np.array(data.prices)
-        
-        # 移動平均計算
-        sma_5 = np.mean(prices[-5:]) if len(prices) >= 5 else np.mean(prices)
-        sma_10 = np.mean(prices[-10:]) if len(prices) >= 10 else np.mean(prices)
-        sma_20 = np.mean(prices[-20:]) if len(prices) >= 20 else np.mean(prices)
-        sma_50 = np.mean(prices[-50:]) if len(prices) >= 50 else np.mean(prices)
-        
-        # ボラティリティ
-        volatility = np.std(prices[-30:]) if len(prices) >= 30 else np.std(prices)
-        volatility_ratio = volatility / prices[-1] if prices[-1] != 0 else 0
-        
-        # 価格変化率
-        price_change = (prices[-1] - prices[0]) / prices[0] * 100 if len(prices) > 0 else 0
-        momentum_5 = (prices[-1] - prices[-5]) / prices[-5] if len(prices) >= 5 and prices[-5] != 0 else 0
-        momentum_10 = (prices[-1] - prices[-10]) / prices[-10] if len(prices) >= 10 and prices[-10] != 0 else 0
-        momentum_20 = (prices[-1] - prices[-20]) / prices[-20] if len(prices) >= 20 and prices[-20] != 0 else 0
-        
-        # 特徴量ベクトル作成（学習時と同じ順序・構造）
+    for i in range(lookback, len(prices_array) - horizon):
+        # Features: price statistics from lookback window
+        window = prices_array[i-lookback:i]
         features = [
-            prices[-1],  # price
-            sma_5, sma_10, sma_20, sma_50,
-            volatility, volatility_ratio,
-            momentum_5, momentum_10, momentum_20,
-            data.rsi / 100 if data.rsi else 0.5,
-            data.macd if data.macd else 0,
-            data.sentiment_score / 100 if data.sentiment_score else 0.5,
-            data.pe_ratio / 100 if data.pe_ratio else 0.3,
-            data.roe / 100 if data.roe else 0.15,
-            np.log(data.volume) if data.volume else 10
+            window[-1],  # current price
+            np.mean(window[-5:]),  # SMA5
+            np.mean(window[-10:]),  # SMA10
+            np.mean(window[-20:]) if len(window) >= 20 else window[-1],  # SMA20
+            np.std(window),  # volatility
+            (window[-1] - window[-7]) / window[-7] * 100 if len(window) >= 7 else 0,  # momentum 7d
+            (window[-1] - window[0]) / window[0] * 100,  # momentum full window
+            (np.max(window) - np.min(window)) / np.min(window) * 100,  # price range
         ]
+        X.append(features)
         
-        features_array = np.array(features).reshape(1, -1)
-        
-        # 予測実行
-        if cached_model is not None:
-            # キャッシュされたモデルを使用
-            print(f"🤖 Using cached model for prediction (symbol: {data.symbol})")
-            prediction = cached_model.predict(features_array, num_iteration=cached_model.best_iteration)[0]
-            model_name = f"LightGBM v1.0 (Trained for {data.symbol})"
-            base_confidence = 0.85  # 学習済みモデルは高信頼度
-        else:
-            # デモ用: 統計的予測（学習済みモデルがない場合）
-            print(f"⚠️  No cached model found for {data.symbol}, using statistical fallback")
-            trend_factor = 1 + (price_change / 100) * 0.3
-            sentiment_factor = 1 + ((data.sentiment_score - 50) / 100) * 0.1 if data.sentiment_score else 1
-            rsi_factor = 1 + ((data.rsi - 50) / 100) * 0.05 if data.rsi else 1
-            
-            base_prediction = sma_5 * trend_factor * sentiment_factor * rsi_factor
-            
-            # ランダムノイズ追加(±2%)
-            noise = np.random.uniform(-0.02, 0.02)
-            prediction = base_prediction * (1 + noise)
-            model_name = "LightGBM v1.0 (Statistical Hybrid)"
-            base_confidence = 0.70  # 統計モデルは中信頼度
-        
-        # 信頼度計算
-        # センチメントとRSIの中立性からの距離で信頼度を調整
-        sentiment_confidence = 1 - abs(data.sentiment_score - 50) / 50 if data.sentiment_score else 0.5
-        rsi_confidence = 1 - abs(data.rsi - 50) / 50 if data.rsi else 0.5
-        volatility_penalty = min(0.3, volatility / prices[-1] * 2)
-        
-        confidence = base_confidence + (sentiment_confidence * 0.1) + (rsi_confidence * 0.1) - volatility_penalty
-        confidence = max(0.4, min(0.95, confidence))
-        
-        # 変化率計算
-        change_percent = ((prediction - prices[-1]) / prices[-1]) * 100
-        
-        # カウンター更新
-        request_counter["daily"] += 1
-        request_counter["total"] += 1
-        
-        # キャッシュモデルを使用した場合、ml_predictionオブジェクトを生成
-        ml_pred_obj = None
-        if cached_model is not None:
-            ml_pred_obj = {
-                "predicted_price": round(float(prediction), 2),
-                "confidence": round(float(confidence), 2),
-                "change_percent": round(float(change_percent), 2),
-                "model": model_name,
-                "features_used": len(features),
-                "timestamp": datetime.now().isoformat()
-            }
-        
-        return PredictionResponse(
-            symbol=data.symbol,
-            predicted_price=round(float(prediction), 2),
-            confidence=round(float(confidence), 2),
-            change_percent=round(float(change_percent), 2),
-            model=model_name,
-            features_used=len(features),
-            timestamp=datetime.now().isoformat(),
-            ml_prediction=ml_pred_obj,  # キャッシュモデル使用時のみ設定
-            ml_training=cached_training  # キャッシュされた学習結果
-        )
+        # Target: future price (horizon days ahead)
+        y.append(prices_array[i + horizon])
     
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
+    return np.array(X), np.array(y)
 
-@app.get("/stats", response_model=dict)
-async def get_stats():
-    """Get API statistics"""
-    return {
-        "total_requests": request_counter["total"],
-        "requests_today": request_counter["daily"],
-        "last_reset": request_counter["last_reset"].isoformat(),
-        "status": "operational"
+
+def train_model(symbol: str, prices: List[float], enable_backfit: bool = False) -> dict:
+    """Train LightGBM model for stock prediction"""
+    
+    start_time = time.time()
+    
+    logger.info(f"Training model for {symbol} with {len(prices)} price points")
+    
+    # Prepare training data
+    X, y = prepare_training_data(prices, lookback=30, horizon=1)
+    
+    if len(X) < 50:
+        raise ValueError(f"Insufficient data for training. Need at least 80 days, got {len(prices)}")
+    
+    # Backfit validation: exclude last 30 days from training
+    if enable_backfit:
+        # Split: exclude last 30 for validation
+        train_size = len(X) - 30
+        X_train, y_train = X[:train_size], y[:train_size]
+        X_val, y_val = X[train_size:], y[train_size:]
+        logger.info(f"Backfit mode: Training on {len(X_train)} samples, validating on {len(X_val)} samples")
+    else:
+        # Normal mode: use 80% for training, 20% for validation
+        X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+    
+    # Scale features
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_val_scaled = scaler.transform(X_val)
+    
+    # Train LightGBM model
+    params = {
+        'objective': 'regression',
+        'metric': 'rmse',
+        'boosting_type': 'gbdt',
+        'num_leaves': 31,
+        'learning_rate': 0.05,
+        'feature_fraction': 0.9,
+        'bagging_fraction': 0.8,
+        'bagging_freq': 5,
+        'verbose': -1
     }
-
-@app.post("/train", response_model=TrainingResponse)
-async def train_model(request: Request, data: PredictionRequest):
-    """
-    Train a stock-specific LightGBM model
     
-    Returns detailed training information including:
-    - Training data details
-    - Hyperparameters used
-    - Learning curves (train/validation loss)
-    - Performance metrics (train/test MAE, RMSE, R²)
-    - Feature importances
+    train_data = lgb.Dataset(X_train_scaled, label=y_train)
+    val_data = lgb.Dataset(X_val_scaled, label=y_val, reference=train_data)
     
-    This endpoint trains a custom model for the specific stock symbol.
-    """
-    training_start_time = datetime.now()
+    model = lgb.train(
+        params,
+        train_data,
+        num_boost_round=100,
+        valid_sets=[val_data],
+        callbacks=[lgb.early_stopping(stopping_rounds=10), lgb.log_evaluation(period=0)]
+    )
     
-    try:
-        print(f"\n{'='*60}")
-        print(f"🤖 Training model for {data.symbol}")
-        print(f"{'='*60}")
+    # Calculate metrics
+    y_pred = model.predict(X_val_scaled)
+    mae = np.mean(np.abs(y_val - y_pred))
+    rmse = np.sqrt(np.mean((y_val - y_pred) ** 2))
+    
+    # Calculate R2 score
+    ss_res = np.sum((y_val - y_pred) ** 2)
+    ss_tot = np.sum((y_val - np.mean(y_val)) ** 2)
+    r2_score = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
+    
+    training_duration = time.time() - start_time
+    
+    # Feature importance
+    feature_names = ['close', 'sma_5', 'sma_10', 'sma_20', 'volatility', 'momentum_7d', 'momentum_full', 'price_range']
+    feature_importance = [
+        {"feature": name, "importance": float(imp)}
+        for name, imp in zip(feature_names, model.feature_importance(importance_type='gain'))
+    ]
+    feature_importance.sort(key=lambda x: x['importance'], reverse=True)
+    
+    # Generate model ID
+    model_id = hashlib.md5(f"{symbol}_{int(time.time())}".encode()).hexdigest()[:12]
+    
+    # Store in cache
+    MODEL_CACHE[symbol] = {
+        'model': model,
+        'scaler': scaler,
+        'model_id': model_id,
+        'trained_at': datetime.now().isoformat(),
+        'training_samples': len(X_train)
+    }
+    
+    # Backfit validation results
+    backfit_validation = None
+    if enable_backfit:
+        # Calculate accuracy on validation set (last 30 days)
+        predictions = []
+        actuals = y_val.tolist()
         
-        # 特徴量エンジニアリング（予測と同じロジック）
-        prices = np.array(data.prices)
+        for i in range(len(X_val)):
+            pred = model.predict(X_val_scaled[i:i+1])[0]
+            predictions.append(float(pred))
         
-        # 十分なデータがあるか確認
-        if len(prices) < 30:
-            raise HTTPException(
-                status_code=400,
-                detail="Insufficient data for training. Need at least 30 days of historical prices."
-            )
-        
-        # 移動平均計算
-        sma_5 = np.mean(prices[-5:]) if len(prices) >= 5 else np.mean(prices)
-        sma_10 = np.mean(prices[-10:]) if len(prices) >= 10 else np.mean(prices)
-        sma_20 = np.mean(prices[-20:]) if len(prices) >= 20 else np.mean(prices)
-        sma_50 = np.mean(prices[-50:]) if len(prices) >= 50 else np.mean(prices)
-        
-        # ボラティリティ
-        volatility = np.std(prices[-30:]) if len(prices) >= 30 else np.std(prices)
-        volatility_ratio = volatility / prices[-1] if prices[-1] != 0 else 0
-        
-        # 価格変化率
-        momentum_5 = (prices[-1] - prices[-5]) / prices[-5] if len(prices) >= 5 and prices[-5] != 0 else 0
-        momentum_10 = (prices[-1] - prices[-10]) / prices[-10] if len(prices) >= 10 and prices[-10] != 0 else 0
-        momentum_20 = (prices[-1] - prices[-20]) / prices[-20] if len(prices) >= 20 and prices[-20] != 0 else 0
-        
-        # 時系列データの準備（最新のN日分を使って学習データセット作成）
-        # 各日について特徴量を計算し、翌日の価格を予測ターゲットとする
-        feature_list = []
-        target_list = []
-        
-        # 最低限の窓幅を確保
-        min_window = 50
-        if len(prices) < min_window + 1:
-            # データが少ない場合は現在の特徴量で学習
-            features = [
-                prices[-1],  # 現在価格
-                sma_5, sma_10, sma_20, sma_50,
-                volatility, volatility_ratio,
-                momentum_5, momentum_10, momentum_20,
-                data.rsi / 100 if data.rsi else 0.5,
-                data.macd if data.macd else 0,
-                data.sentiment_score / 100 if data.sentiment_score else 0.5,
-                data.pe_ratio / 100 if data.pe_ratio else 0.3,
-                data.roe / 100 if data.roe else 0.15,
-                np.log(data.volume) if data.volume else 10
-            ]
-            
-            # ダミーターゲット（現在価格の±5%の範囲でランダム）
-            for _ in range(100):  # 最低100サンプル生成
-                noise = np.random.uniform(-0.05, 0.05)
-                feature_list.append(features)
-                target_list.append(prices[-1] * (1 + noise))
-        else:
-            # 十分なデータがある場合は時系列で特徴量作成
-            for i in range(min_window, len(prices)):
-                window_prices = prices[:i+1]
-                
-                # 特徴量計算
-                curr_price = window_prices[-1]
-                w_sma_5 = np.mean(window_prices[-5:]) if len(window_prices) >= 5 else curr_price
-                w_sma_10 = np.mean(window_prices[-10:]) if len(window_prices) >= 10 else curr_price
-                w_sma_20 = np.mean(window_prices[-20:]) if len(window_prices) >= 20 else curr_price
-                w_sma_50 = np.mean(window_prices[-50:]) if len(window_prices) >= 50 else curr_price
-                
-                w_volatility = np.std(window_prices[-30:]) if len(window_prices) >= 30 else np.std(window_prices)
-                w_volatility_ratio = w_volatility / curr_price if curr_price != 0 else 0
-                
-                w_momentum_5 = (curr_price - window_prices[-5]) / window_prices[-5] if len(window_prices) >= 5 and window_prices[-5] != 0 else 0
-                w_momentum_10 = (curr_price - window_prices[-10]) / window_prices[-10] if len(window_prices) >= 10 and window_prices[-10] != 0 else 0
-                w_momentum_20 = (curr_price - window_prices[-20]) / window_prices[-20] if len(window_prices) >= 20 and window_prices[-20] != 0 else 0
-                
-                features = [
-                    curr_price,
-                    w_sma_5, w_sma_10, w_sma_20, w_sma_50,
-                    w_volatility, w_volatility_ratio,
-                    w_momentum_5, w_momentum_10, w_momentum_20,
-                    data.rsi / 100 if data.rsi else 0.5,
-                    data.macd if data.macd else 0,
-                    data.sentiment_score / 100 if data.sentiment_score else 0.5,
-                    data.pe_ratio / 100 if data.pe_ratio else 0.3,
-                    data.roe / 100 if data.roe else 0.15,
-                    np.log(data.volume) if data.volume else 10
-                ]
-                
-                feature_list.append(features)
-                
-                # ターゲットは次の日の価格（存在する場合）
-                if i < len(prices) - 1:
-                    target_list.append(prices[i + 1])
-                else:
-                    # 最後のデータポイントは予測として使うため、ダミーターゲット
-                    target_list.append(prices[-1] * 1.01)  # 1%増加と仮定
-        
-        # NumPy配列に変換
-        X = np.array(feature_list)
-        y = np.array(target_list)
-        
-        feature_names = [
-            'price', 'sma_5', 'sma_10', 'sma_20', 'sma_50',
-            'volatility', 'volatility_ratio',
-            'momentum_5', 'momentum_10', 'momentum_20',
-            'rsi', 'macd', 'sentiment', 'pe_ratio', 'roe', 'log_volume'
-        ]
-        
-        print(f"📊 Training data prepared: {len(X)} samples, {X.shape[1]} features")
-        
-        # Train/Test分割（時系列なので最後の20%をテスト）
-        split_idx = int(len(X) * 0.8)
-        X_train, X_test = X[:split_idx], X[split_idx:]
-        y_train, y_test = y[:split_idx], y[split_idx:]
-        
-        print(f"  Train set: {len(X_train)} samples")
-        print(f"  Test set:  {len(X_test)} samples")
-        
-        # LightGBMデータセット作成
-        train_data = lgb.Dataset(X_train, label=y_train, feature_name=feature_names)
-        test_data = lgb.Dataset(X_test, label=y_test, feature_name=feature_names, reference=train_data)
-        
-        # ハイパーパラメータ
-        params = {
-            'objective': 'regression',
-            'metric': ['rmse', 'mae'],
-            'boosting_type': 'gbdt',
-            'num_leaves': 31,
-            'learning_rate': 0.05,
-            'feature_fraction': 0.9,
-            'bagging_fraction': 0.8,
-            'bagging_freq': 5,
-            'verbose': -1,
-            'max_depth': 6,
-            'min_data_in_leaf': 20,
-        }
-        
-        num_boost_round = 500
-        
-        print(f"\n⚙️  Training with hyperparameters:")
-        for key, value in params.items():
-            print(f"  {key}: {value}")
-        print(f"  num_boost_round: {num_boost_round}")
-        
-        # 学習実行
-        print(f"\n🏋️  Training in progress...")
-        evals_result = {}
-        
-        model = lgb.train(
-            params,
-            train_data,
-            num_boost_round=num_boost_round,
-            valid_sets=[train_data, test_data],
-            valid_names=['train', 'test'],
-            callbacks=[
-                lgb.early_stopping(stopping_rounds=50, verbose=False),
-                lgb.record_evaluation(evals_result)
-            ]
+        # Calculate prediction accuracy
+        correct_direction = sum(
+            1 for i in range(1, len(predictions))
+            if (predictions[i] > actuals[i-1]) == (actuals[i] > actuals[i-1])
         )
+        direction_accuracy = correct_direction / (len(predictions) - 1) * 100 if len(predictions) > 1 else 0
         
-        best_iteration = model.best_iteration
-        print(f"✅ Training complete! Best iteration: {best_iteration}")
-        
-        # 予測実行
-        y_train_pred = model.predict(X_train, num_iteration=best_iteration)
-        y_test_pred = model.predict(X_test, num_iteration=best_iteration)
-        
-        # メトリクス計算
-        train_rmse = float(np.sqrt(mean_squared_error(y_train, y_train_pred)))
-        test_rmse = float(np.sqrt(mean_squared_error(y_test, y_test_pred)))
-        train_mae = float(mean_absolute_error(y_train, y_train_pred))
-        test_mae = float(mean_absolute_error(y_test, y_test_pred))
-        train_r2 = float(r2_score(y_train, y_train_pred))
-        test_r2 = float(r2_score(y_test, y_test_pred))
-        generalization_gap = test_rmse - train_rmse
-        
-        print(f"\n📈 Performance Metrics:")
-        print(f"  Train RMSE: ${train_rmse:.2f}")
-        print(f"  Test RMSE:  ${test_rmse:.2f}")
-        print(f"  Train MAE:  ${train_mae:.2f}")
-        print(f"  Test MAE:   ${test_mae:.2f}")
-        print(f"  Train R²:   {train_r2:.4f}")
-        print(f"  Test R²:    {test_r2:.4f}")
-        print(f"  Gap:        ${generalization_gap:.2f}")
-        
-        # 学習曲線データ抽出
-        train_losses = evals_result['train']['rmse']
-        val_losses = evals_result['test']['rmse']
-        iterations = list(range(1, len(train_losses) + 1))
-        
-        # 特徴量重要度
-        importances = model.feature_importance(importance_type='gain')
-        feature_importance_list = [
-            FeatureImportance(
-                feature=feature_names[i],
-                importance=float(importances[i])
-            )
-            for i in range(len(feature_names))
-        ]
-        feature_importance_list.sort(key=lambda x: x.importance, reverse=True)
-        
-        print(f"\n🔍 Top 5 Important Features:")
-        for i, fi in enumerate(feature_importance_list[:5], 1):
-            print(f"  {i}. {fi.feature}: {fi.importance:.0f}")
-        
-        # 未来30日の予測を生成
-        print(f"\n🔮 Generating 30-day future predictions...")
-        future_predictions_list = []
+        backfit_validation = {
+            'validation_days': len(X_val),
+            'mae': float(mae),
+            'rmse': float(rmse),
+            'r2_score': float(r2_score),
+            'direction_accuracy': float(direction_accuracy),
+            'predictions': predictions[:10],  # First 10 predictions for visualization
+            'actuals': actuals[:10]
+        }
+    
+    # Generate future predictions (30 days)
+    future_predictions = None
+    try:
+        last_window = X[-1:] if len(X) > 0 else X_train[-1:]
+        future_prices = []
         future_dates = []
         
-        # 現在の最新特徴量を取得
-        last_features = X[-1].copy()
+        current_window = scaler.transform(last_window)[0]
+        base_date = datetime.now()
         
-        # 過去50日の価格履歴を保持（移動平均計算用）
-        price_history = list(prices[-50:])
-        last_price = prices[-1]  # 最後の実際の価格
-        
-        # 履歴データのボラティリティを計算
-        recent_prices = prices[-31:]  # 過去31日の価格（30個の差分計算のため）
-        price_changes = np.diff(recent_prices) / recent_prices[:-1]
-        historical_volatility = np.std(price_changes)
-        
-        print(f"   Historical volatility: {historical_volatility:.4f}")
-        
-        # 30日間の予測をシミュレーション
-        for day in range(1, 31):
-            # 未来の日付生成
-            future_date = datetime.now() + pd.Timedelta(days=day)
-            future_dates.append(future_date.strftime('%Y-%m-%d'))
+        for i in range(30):
+            # Predict next price
+            next_price = model.predict([current_window])[0]
+            future_prices.append(float(next_price))
+            future_dates.append((base_date + timedelta(days=i+1)).strftime('%Y-%m-%d'))
             
-            # 予測実行
-            pred_price = model.predict([last_features], num_iteration=best_iteration)[0]
-            
-            # ランダムなボラティリティを追加（より現実的な変動）
-            volatility_factor = np.random.normal(0, historical_volatility * 0.5)
-            pred_price = pred_price * (1 + volatility_factor)
-            
-            future_predictions_list.append(float(pred_price))
-            price_history.append(pred_price)
-            
-            # 次の日のために特徴量を正確に更新
-            last_features[0] = pred_price  # price
-            
-            # 実際の移動平均を計算
-            last_features[1] = np.mean(price_history[-5:])   # sma_5
-            last_features[2] = np.mean(price_history[-10:])  # sma_10
-            last_features[3] = np.mean(price_history[-20:])  # sma_20
-            last_features[4] = np.mean(price_history[-50:])  # sma_50
-            
-            # ボラティリティ（過去20日）
-            if len(price_history) >= 21:
-                recent_20 = price_history[-21:]  # 過去21日（20個の差分計算のため）
-                recent_returns = np.diff(recent_20) / np.array(recent_20[:-1])
-                last_features[5] = np.std(recent_returns)  # volatility_20
-            
-            # モメンタム（過去10日の変化率）
-            if len(price_history) >= 10:
-                last_features[6] = (price_history[-1] - price_history[-10]) / price_history[-10]  # momentum_10
-            
-            # RSI（簡易計算）
-            if len(price_history) >= 14:
-                recent_changes = np.diff(price_history[-15:])
-                gains = recent_changes[recent_changes > 0].sum() / 14
-                losses = -recent_changes[recent_changes < 0].sum() / 14
-                if losses > 0:
-                    rs = gains / losses
-                    last_features[7] = 100 - (100 / (1 + rs))  # rsi_14
-                else:
-                    last_features[7] = 100
+            # Update window for next prediction (shift left, add new prediction)
+            current_window = np.roll(current_window, -1)
+            current_window[-1] = next_price
         
-        # 信頼区間を計算（±5%の範囲）
-        lower_bound = [p * 0.95 for p in future_predictions_list]
-        upper_bound = [p * 1.05 for p in future_predictions_list]
+        # Calculate confidence bounds (simple ±2 std approach)
+        pred_std = np.std(future_prices)
+        lower_bound = [float(p - 2 * pred_std) for p in future_prices]
+        upper_bound = [float(p + 2 * pred_std) for p in future_prices]
         
-        future_pred = FuturePrediction(
-            dates=future_dates,
-            predictions=future_predictions_list,
-            lower_bound=lower_bound,
-            upper_bound=upper_bound
-        )
+        future_predictions = {
+            'dates': future_dates,
+            'predictions': future_prices,
+            'lower_bound': lower_bound,
+            'upper_bound': upper_bound
+        }
         
-        print(f"✅ Future predictions generated: {len(future_predictions_list)} days")
-        print(f"   First day: ${future_predictions_list[0]:.2f}")
-        print(f"   Last day: ${future_predictions_list[-1]:.2f}")
-        print(f"   Change: {((future_predictions_list[-1] - last_price) / last_price * 100):.2f}%")
-        
-        # バックフィット検証（オプション: enable_backfitフラグがTrueの場合のみ）
-        backfit_pred = None
-        if data.enable_backfit:
-            # 過去30日のバックフィット予測を生成（データリーク対策）
-            # 別モデルを学習: 最新30日を除外して学習し、その30日を予測
-            print(f"\n🔙 Generating 30-day backfit predictions (leak-free)...")
-            backfit_predictions_list = []
-            backfit_dates = []
-            backfit_actual_prices = []
-            
-            # 過去30日を除外したデータで別モデルを学習
-            backfit_size = 30
-            if len(X) > backfit_size:
-                # 最新30日を除外
-                X_backfit_train = X[:-backfit_size]
-                y_backfit_train = y[:-backfit_size]
-                X_backfit_test = X[-backfit_size:]
-                y_backfit_test = y[-backfit_size:]
-                
-                print(f"   Training backfit model with {len(X_backfit_train)} samples (excluding last {backfit_size} days)")
-                print(f"   📊 Production model uses: {len(X)} samples")
-                print(f"   📊 Backfit model uses: {len(X_backfit_train)} samples (DIFFERENT from production)")
-                print(f"   🎯 Testing on: {len(X_backfit_test)} excluded samples")
-                
-                # バックフィット検証用モデルを学習
-                backfit_train_data = lgb.Dataset(X_backfit_train, label=y_backfit_train, feature_name=feature_names)
-                
-                backfit_model = lgb.train(
-                    params,
-                    backfit_train_data,
-                    num_boost_round=num_boost_round,
-                    valid_sets=[backfit_train_data],
-                    valid_names=['train'],
-                    callbacks=[
-                        lgb.early_stopping(stopping_rounds=50, verbose=False)
-                    ]
-                )
-                
-                print(f"   ✅ Backfit model trained (model ID: {id(backfit_model)})")
-                print(f"   ✅ Production model ID: {id(model)} (DIFFERENT object)")
-                
-                # 除外した30日を予測
-                backfit_predictions = backfit_model.predict(X_backfit_test, num_iteration=backfit_model.best_iteration)
-                backfit_actual = y_backfit_test
-                
-                # 日付を生成
-                for i in range(len(backfit_predictions)):
-                    backfit_date = datetime.now() - pd.Timedelta(days=(backfit_size - i))
-                    backfit_dates.append(backfit_date.strftime('%Y-%m-%d'))
-                    backfit_predictions_list.append(float(backfit_predictions[i]))
-                    backfit_actual_prices.append(float(backfit_actual[i]))
-                
-                # バックフィット精度を計算
-                backfit_rmse = float(np.sqrt(mean_squared_error(backfit_actual_prices, backfit_predictions_list)))
-                backfit_mae = float(mean_absolute_error(backfit_actual_prices, backfit_predictions_list))
-                
-                # 方向性の正解率を計算
-                correct_directions = 0
-                for i in range(1, len(backfit_actual_prices)):
-                    actual_direction = backfit_actual_prices[i] > backfit_actual_prices[i-1]
-                    pred_direction = backfit_predictions_list[i] > backfit_predictions_list[i-1]
-                    if actual_direction == pred_direction:
-                        correct_directions += 1
-                
-                direction_accuracy = (correct_directions / (len(backfit_actual_prices) - 1) * 100) if len(backfit_actual_prices) > 1 else 0.0
-                
-                backfit_pred = BackfitPrediction(
-                    dates=backfit_dates,
-                    predictions=backfit_predictions_list,
-                    actual_prices=backfit_actual_prices,
-                    rmse=backfit_rmse,
-                    mae=backfit_mae,
-                    direction_accuracy=direction_accuracy
-                )
-                
-                print(f"✅ Backfit predictions generated: {len(backfit_predictions_list)} days")
-                print(f"   RMSE: ${backfit_rmse:.2f}")
-                print(f"   MAE: ${backfit_mae:.2f}")
-                print(f"   Direction Accuracy: {direction_accuracy:.1f}%")
-            else:
-                # データ不足の場合はNone
-                backfit_pred = None
-                print(f"⚠️  Insufficient data for backfit validation (need > {backfit_size} samples)")
-        else:
-            print(f"⏭️  Backfit validation skipped (enable_backfit=False)")
-        
-        # 学習時間計算
-        training_duration = (datetime.now() - training_start_time).total_seconds()
-        
-        # モデルIDの生成
-        model_id = f"{data.symbol}_custom_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        
-        # レスポンス作成
-        training_response = TrainingResponse(
-            success=True,
-            model_id=model_id,
-            symbol=data.symbol,
-            training_data=TrainingDataInfo(
-                total_samples=len(X),
-                train_samples=len(X_train),
-                test_samples=len(X_test),
-                features_count=len(feature_names),
-                date_range_start=None,  # 実際のデータがあれば日付範囲を追加
-                date_range_end=None
-            ),
-            hyperparameters=Hyperparameters(
-                objective=params['objective'],
-                boosting_type=params['boosting_type'],
-                num_leaves=params['num_leaves'],
-                learning_rate=params['learning_rate'],
-                max_depth=params['max_depth'],
-                min_data_in_leaf=params['min_data_in_leaf'],
-                feature_fraction=params['feature_fraction'],
-                bagging_fraction=params['bagging_fraction'],
-                bagging_freq=params['bagging_freq'],
-                num_boost_round=num_boost_round
-            ),
-            learning_curves=LearningCurves(
-                iterations=iterations,
-                train_loss=train_losses,
-                val_loss=val_losses
-            ),
-            performance_metrics=PerformanceMetrics(
-                train_rmse=train_rmse,
-                test_rmse=test_rmse,
-                train_mae=train_mae,
-                test_mae=test_mae,
-                train_r2=train_r2,
-                test_r2=test_r2,
-                generalization_gap=generalization_gap
-            ),
-            feature_importances=feature_importance_list,
-            training_duration=training_duration,
-            timestamp=datetime.now().isoformat(),
-            message=f"Successfully trained custom model for {data.symbol}",
-            future_predictions=future_pred,  # 未来30日予測を追加
-            backfit_predictions=backfit_pred  # 過去30日バックフィット予測を追加
-        )
-        
-        # モデルと学習結果をキャッシュに保存（7日間有効）
-        cache_model(data.symbol, model, feature_names, training_response.model_dump())
-        
-        print(f"\n{'='*60}")
-        print(f"✅ Training complete for {data.symbol}!")
-        print(f"   Duration: {training_duration:.1f} seconds")
-        print(f"   Model ID: {model_id}")
-        print(f"   📦 Model and training results cached (valid for 7 days)")
-        print(f"{'='*60}\n")
-        
-        return training_response
-        
-    except HTTPException:
-        raise
+        logger.info(f"Generated 30-day future predictions for {symbol}")
     except Exception as e:
-        print(f"❌ Training error: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Training error: {str(e)}")
+        logger.error(f"Failed to generate future predictions: {str(e)}")
+    
+    # Generate backfit predictions (past 30 days)
+    backfit_predictions = None
+    if enable_backfit and len(X_val) >= 30:
+        try:
+            backfit_dates = [(datetime.now() - timedelta(days=30-i)).strftime('%Y-%m-%d') for i in range(30)]
+            backfit_preds = [float(model.predict(X_val_scaled[i:i+1])[0]) for i in range(min(30, len(X_val)))]
+            backfit_actuals = y_val[:30].tolist()
+            
+            # Calculate direction accuracy
+            correct_direction = sum(
+                1 for i in range(1, len(backfit_preds))
+                if (backfit_preds[i] > backfit_actuals[i-1]) == (backfit_actuals[i] > backfit_actuals[i-1])
+            )
+            direction_accuracy = (correct_direction / (len(backfit_preds) - 1) * 100) if len(backfit_preds) > 1 else 0
+            
+            backfit_predictions = {
+                'dates': backfit_dates[:len(backfit_preds)],
+                'predictions': backfit_preds,
+                'actual_prices': backfit_actuals,
+                'rmse': float(rmse),
+                'mae': float(mae),
+                'direction_accuracy': float(direction_accuracy)
+            }
+            
+            logger.info(f"Generated backfit predictions for {symbol}, direction accuracy: {direction_accuracy:.1f}%")
+        except Exception as e:
+            logger.error(f"Failed to generate backfit predictions: {str(e)}")
+    
+    result = {
+        'symbol': symbol,
+        'model_id': model_id,
+        'training_duration': training_duration,
+        'accuracy_metrics': {
+            'mae': float(mae),
+            'rmse': float(rmse),
+            'r2_score': float(r2_score),
+            'training_samples': len(X_train),
+            'validation_samples': len(X_val)
+        },
+        'feature_importance': feature_importance,
+        'backfit_validation': backfit_validation,
+        'future_predictions': future_predictions,
+        'backfit_predictions': backfit_predictions
+    }
+    
+    logger.info(f"Model trained successfully: {model_id}, MAE: {mae:.2f}, R2: {r2_score:.3f}")
+    
+    return result
 
-# 起動時イベント
-@app.on_event("startup")
-async def startup_event():
-    """Initialize on startup"""
-    print("🚀 Stock Prediction ML API started")
-    print(f"📊 Model: LightGBM v1.0")
-    print(f"🔧 Environment: {os.getenv('ENV', 'production')}")
-    initialize_model()
+
+@app.get("/")
+async def root():
+    return {
+        "service": "Stock ML API",
+        "version": "2.0.0",
+        "status": "operational",
+        "endpoints": {
+            "health": "/health",
+            "predict": "/predict (POST)",
+            "train": "/train (POST)"
+        }
+    }
+
+
+@app.get("/health")
+async def health():
+    global REQUEST_COUNT
+    return {
+        "status": "healthy",
+        "model_loaded": len(MODEL_CACHE) > 0,
+        "cached_models": len(MODEL_CACHE),
+        "requests_today": REQUEST_COUNT,
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@app.post("/predict", response_model=MLPredictionResponse)
+async def predict(request: MLPredictionRequest):
+    """Predict stock price using trained or generic model"""
+    
+    global REQUEST_COUNT
+    REQUEST_COUNT += 1
+    
+    try:
+        logger.info(f"Prediction request for {request.symbol} with {len(request.prices)} prices")
+        
+        # Check if we have a cached model for this symbol
+        cached_model = MODEL_CACHE.get(request.symbol)
+        use_trained_model = cached_model is not None
+        
+        if use_trained_model:
+            logger.info(f"Using cached trained model for {request.symbol}")
+            model = cached_model['model']
+            scaler = cached_model['scaler']
+            model_id = cached_model['model_id']
+        else:
+            logger.info(f"No cached model for {request.symbol}, training generic model")
+            # Train a quick model on provided data
+            train_result = train_model(request.symbol, request.prices, enable_backfit=False)
+            cached_model = MODEL_CACHE.get(request.symbol)
+            model = cached_model['model']
+            scaler = cached_model['scaler']
+            model_id = cached_model['model_id']
+        
+        # Create features for prediction
+        features_df = create_features(
+            request.prices,
+            request.rsi,
+            request.macd,
+            request.sentiment_score,
+            request.pe_ratio,
+            request.roe
+        )
+        
+        # Use only the features that were used in training
+        feature_subset = features_df[['close', 'sma_5', 'sma_20', 'sma_50', 'volatility', 
+                                      'momentum_7d', 'momentum_14d', 'price_range_30d']].values
+        
+        # Scale and predict
+        features_scaled = scaler.transform(feature_subset)
+        predicted_price = float(model.predict(features_scaled)[0])
+        
+        current_price = request.prices[-1]
+        change_percent = ((predicted_price - current_price) / current_price) * 100
+        
+        # Calculate confidence based on model performance
+        if use_trained_model:
+            # Higher confidence for trained models
+            confidence = min(0.85, 0.70 + abs(change_percent) / 100)
+        else:
+            # Lower confidence for generic models
+            confidence = min(0.75, 0.60 + abs(change_percent) / 100)
+        
+        # Feature importance
+        feature_names = ['close', 'sma_5', 'sma_20', 'sma_50', 'volatility', 'momentum_7d', 'momentum_14d', 'price_range_30d']
+        feature_importances = [
+            {"feature": name, "importance": float(imp)}
+            for name, imp in zip(feature_names, model.feature_importance(importance_type='gain'))
+        ]
+        feature_importances.sort(key=lambda x: x['importance'], reverse=True)
+        
+        response = MLPredictionResponse(
+            symbol=request.symbol,
+            predicted_price=predicted_price,
+            confidence=confidence,
+            change_percent=change_percent,
+            model="LightGBM-Trained" if use_trained_model else "LightGBM-Generic",
+            features_used=len(feature_subset[0]),
+            timestamp=datetime.now().isoformat(),
+            feature_importances=feature_importances[:10],
+            model_metrics={
+                "model_id": model_id,
+                "trained_at": cached_model['trained_at'],
+                "training_samples": cached_model['training_samples']
+            },
+            training_info={
+                "data_start_date": (datetime.now().date() - pd.Timedelta(days=len(request.prices))).isoformat(),
+                "data_end_date": datetime.now().date().isoformat(),
+                "training_days": len(request.prices),
+                "last_trained": cached_model['trained_at']
+            }
+        )
+        
+        logger.info(f"Prediction complete: {predicted_price:.2f} ({change_percent:+.2f}%)")
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Prediction error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
+
+
+@app.post("/train", response_model=MLTrainingResponse)
+async def train(request: MLPredictionRequest):
+    """Train a custom model for specific symbol"""
+    
+    global REQUEST_COUNT
+    REQUEST_COUNT += 1
+    
+    try:
+        logger.info(f"Training request for {request.symbol} (backfit: {request.enable_backfit})")
+        
+        if len(request.prices) < 80:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Insufficient data. Need at least 80 days, got {len(request.prices)}"
+            )
+        
+        result = train_model(request.symbol, request.prices, request.enable_backfit)
+        
+        return MLTrainingResponse(**result)
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Training error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Training failed: {str(e)}")
+
+
+@app.delete("/cache/{symbol}")
+async def clear_cache(symbol: str):
+    """Clear cached model for symbol"""
+    if symbol in MODEL_CACHE:
+        del MODEL_CACHE[symbol]
+        return {"message": f"Cache cleared for {symbol}"}
+    return {"message": f"No cache found for {symbol}"}
+
+
+@app.delete("/cache")
+async def clear_all_cache():
+    """Clear all cached models"""
+    MODEL_CACHE.clear()
+    return {"message": "All cache cleared"}
+
+
+class TechnicalAnalysisRequest(BaseModel):
+    """テクニカル分析リクエスト"""
+    symbol: str
+    alpha_vantage_api_key: str
+    mode: str = "both"  # "simple", "advanced", or "both"
+    timeframe: str = "medium"  # "short" (1-7日, 5分-1時間足) or "medium" (1週-3ヶ月, 日足)
+    interval: str = "60min"  # "5min", "15min", "30min", "60min" (短期のみ有効)
+
+
+class TechnicalAnalysisResponse(BaseModel):
+    """テクニカル分析レスポンス"""
+    symbol: str
+    timestamp: str
+    system_a: Optional[dict] = None  # シンプル評価
+    system_b: Optional[dict] = None  # 高度な複合評価
+    execution_time: float
+
+
+@app.post("/api/technical-analysis", response_model=TechnicalAnalysisResponse)
+async def analyze_technical_indicators(request: TechnicalAnalysisRequest):
+    """
+    テクニカル分析API
+    
+    システムA: シンプル評価（5指標のみ）
+    システムB: 高度な複合評価（全指標 + 多層スコアリング）
+    """
+    start_time = time.time()
+    
+    try:
+        logger.info(f"Starting technical analysis for {request.symbol} (mode: {request.mode})")
+        
+        # テクニカル指標モジュールをインポート
+        from alpha_vantage_client import fetch_technical_indicators, fetch_intraday_technical_indicators
+        from technical_scoring import SystemA_SimpleScoring
+        from technical_scoring_advanced import SystemB_AdvancedScoring
+        from technical_scoring_short import SystemB_ShortTermScoring
+        
+        # Alpha Vantageから全テクニカル指標を取得
+        if request.timeframe == "short":
+            logger.info(f"Fetching intraday data for {request.symbol} (interval: {request.interval})")
+            indicators = await fetch_intraday_technical_indicators(request.symbol, request.alpha_vantage_api_key, request.interval)
+        else:
+            logger.info(f"Fetching daily data for {request.symbol}")
+            indicators = await fetch_technical_indicators(request.symbol, request.alpha_vantage_api_key)
+        
+        # データチェック
+        if not indicators or indicators.get('prices', pd.DataFrame()).empty:
+            raise HTTPException(status_code=400, detail=f"No data available for symbol {request.symbol}")
+        
+        result = {
+            "symbol": request.symbol,
+            "timestamp": datetime.now().isoformat(),
+            "system_a": None,
+            "system_b": None,
+            "execution_time": 0.0
+        }
+        
+        # システムA: シンプル評価
+        if request.mode in ["simple", "both"]:
+            logger.info("Calculating System A (Simple) score...")
+            score_a = SystemA_SimpleScoring.calculate(indicators)
+            
+            result["system_a"] = {
+                "name": "シンプル評価（5指標）",
+                "total_score": score_a.total_score,
+                "signal_type": score_a.signal_type.value,
+                "confidence": score_a.confidence,
+                "category_scores": score_a.category_scores,
+                "explanations": [
+                    {
+                        "indicator": exp.indicator,
+                        "signal_type": exp.signal_type.value,
+                        "current_value": exp.current_value,
+                        "score": exp.score,
+                        "explanation": exp.explanation,
+                        "importance": exp.importance
+                    }
+                    for exp in score_a.explanations
+                ]
+            }
+        
+        # システムB: 高度な複合評価
+        if request.mode in ["advanced", "both"]:
+            if request.timeframe == "short":
+                logger.info("Calculating System B-Short (Short-term) score...")
+                score_b = SystemB_ShortTermScoring.calculate(indicators)
+            else:
+                logger.info("Calculating System B-Medium (Advanced) score...")
+                score_b = SystemB_AdvancedScoring.calculate(indicators)
+            
+            # Calculate logic details
+            try:
+                if request.timeframe == "short":
+                    weights = SystemB_ShortTermScoring._get_dynamic_weights(score_b.market_regime)
+                    correlation_adj = SystemB_ShortTermScoring._calculate_correlation_adjustment(score_b.explanations)
+                else:
+                    weights = SystemB_AdvancedScoring._get_dynamic_weights(score_b.market_regime)
+                    correlation_adj = SystemB_AdvancedScoring._calculate_correlation_adjustment(score_b.explanations)
+            except Exception as e:
+                logger.error(f"Failed to calculate logic details: {e}")
+                if request.timeframe == "short":
+                    weights = {'trend': 0.20, 'momentum': 0.55, 'volatility': 0.15, 'volume': 0.10}
+                else:
+                    weights = {'trend': 0.40, 'momentum': 0.30, 'volatility': 0.20, 'volume': 0.10}
+                correlation_adj = 1.0
+            
+            system_b_name = "短期トレード専用（5分-1時間足）" if request.timeframe == "short" else "高度な複合評価（日足）"
+            result["system_b"] = {
+                "name": system_b_name,
+                "timeframe": request.timeframe,
+                "total_score": score_b.total_score,
+                "signal_type": score_b.signal_type.value,
+                "confidence": score_b.confidence,
+                "market_regime": score_b.market_regime.value,
+                "risk_score": score_b.risk_score,
+                "category_scores": score_b.category_scores,
+                "calculation_logic": {
+                    "step1_category_scores": {
+                        "trend": score_b.category_scores.get('trend', 50.0),
+                        "momentum": score_b.category_scores.get('momentum', 50.0),
+                        "volatility": score_b.category_scores.get('volatility', 50.0),
+                        "volume": score_b.category_scores.get('volume', 50.0)
+                    },
+                    "step2_market_regime": score_b.market_regime.value,
+                    "step3_dynamic_weights": {
+                        "trend": f"{weights['trend']*100:.0f}%",
+                        "momentum": f"{weights['momentum']*100:.0f}%",
+                        "volatility": f"{weights['volatility']*100:.0f}%",
+                        "volume": f"{weights['volume']*100:.0f}%"
+                    },
+                    "step4_weighted_score": round(
+                        score_b.category_scores.get('trend', 50) * weights['trend'] +
+                        score_b.category_scores.get('momentum', 50) * weights['momentum'] +
+                        score_b.category_scores.get('volatility', 50) * weights['volatility'] +
+                        score_b.category_scores.get('volume', 50) * weights['volume'],
+                        2
+                    ),
+                    "step5_correlation_adjustment": f"{correlation_adj:.2f}x",
+                    "step6_pattern_bonus": "パターンボーナス適用済み",
+                    "step7_final_score": score_b.total_score
+                },
+                "explanations": [
+                    {
+                        "indicator": exp.indicator,
+                        "signal_type": exp.signal_type.value,
+                        "current_value": exp.current_value,
+                        "score": exp.score,
+                        "explanation": exp.explanation,
+                        "importance": exp.importance
+                    }
+                    for exp in score_b.explanations
+                ]
+            }
+        
+        execution_time = time.time() - start_time
+        result["execution_time"] = round(execution_time, 2)
+        
+        logger.info(f"Technical analysis completed in {execution_time:.2f}s")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Technical analysis failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Technical analysis failed: {str(e)}")
+
+
+class TechnicalMLRequest(BaseModel):
+    """テクニカルML予測リクエスト（システムC）"""
+    symbol: str
+    alpha_vantage_api_key: str
+    enable_backfit: bool = False
+    force_retrain: bool = False
+
+
+class TechnicalMLResponse(BaseModel):
+    """テクニカルML予測レスポンス"""
+    symbol: str
+    timestamp: str
+    training: dict
+    future_predictions: dict
+    explanations: List[dict]
+    feature_count: int
+    sample_count: int
+    execution_time: float
+
+
+@app.post("/api/technical-ml-predict", response_model=TechnicalMLResponse)
+async def predict_with_technical_ml(request: TechnicalMLRequest):
+    """
+    テクニカル指標特化型ML予測API（システムC）
+    
+    125特徴量 + LightGBM for stock price prediction
+    """
+    start_time = time.time()
+    
+    try:
+        logger.info(f"Starting technical ML prediction for {request.symbol}")
+        
+        # モジュールをインポート
+        from alpha_vantage_client import fetch_technical_indicators
+        from technical_ml_model import get_or_train_model
+        
+        # Alpha Vantageから全テクニカル指標を取得
+        indicators = await fetch_technical_indicators(request.symbol, request.alpha_vantage_api_key)
+        
+        # データチェック
+        if not indicators or indicators.get('prices', pd.DataFrame()).empty:
+            raise HTTPException(status_code=400, detail=f"No data available for symbol {request.symbol}")
+        
+        # モデルを取得または学習
+        model, result = get_or_train_model(
+            indicators=indicators,
+            symbol=request.symbol,
+            enable_backfit=request.enable_backfit,
+            force_retrain=request.force_retrain
+        )
+        
+        execution_time = time.time() - start_time
+        result['execution_time'] = round(execution_time, 2)
+        result['timestamp'] = datetime.now().isoformat()
+        
+        logger.info(f"Technical ML prediction completed in {execution_time:.2f}s")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Technical ML prediction failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Technical ML prediction failed: {str(e)}")
+
+
+@app.get("/api/health")
+async def health_check():
+    """ヘルスチェック"""
+    return {
+        "status": "ok",
+        "service": "Stock ML API",
+        "version": "2.1.0",
+        "endpoints": {
+            "ml_prediction": "/api/predict",
+            "ml_training": "/api/train",
+            "technical_analysis": "/api/technical-analysis",
+            "technical_ml_predict": "/api/technical-ml-predict"
+        },
+        "cache_size": len(MODEL_CACHE),
+        "requests_processed": REQUEST_COUNT
+    }
+
 
 if __name__ == "__main__":
     import uvicorn

@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { serveStatic } from 'hono/cloudflare-workers'
 import type { Env } from './types'
 import { performTechnicalAnalysis } from './services/technical'
 import { performFundamentalAnalysis } from './services/fundamental'
@@ -18,15 +19,130 @@ import {
   fetchMacroIndicators,
   SP500_TOP_50
 } from './services/api-client'
+import { getAdvancedTechnicalAnalysis } from './services/technical-ml'
 
 const app = new Hono<{ Bindings: Env }>()
 
 // CORS設定
 app.use('/api/*', cors())
 
+// 静的ファイルの配信（/static/* パス）
+// Cloudflare Pagesでは dist/ がrootになる
+app.get('/static/*', serveStatic({ root: './' }))
+
 // ヘルスチェック
 app.get('/api/health', (c) => {
   return c.json({ status: 'ok', message: 'Stock AI Predictor API is running' })
+})
+
+// プロキシAPI: ML APIへのリクエストを中継（CORS回避）
+app.post('/api/proxy/technical-analysis', async (c) => {
+  try {
+    const body = await c.req.json()
+    // ローカル開発用にlocalhost:8080を使用（本番環境ではCloud Run URLを使用）
+    const ML_API_URL = process.env.ML_API_URL || 'http://localhost:8080'
+    
+    const response = await fetch(`${ML_API_URL}/api/technical-analysis`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body)
+    })
+    
+    const data = await response.json()
+    return c.json(data)
+  } catch (error: any) {
+    console.error('[PROXY] Technical analysis error:', error)
+    return c.json({ error: error.message }, 500)
+  }
+})
+
+app.post('/api/proxy/technical-ml-predict', async (c) => {
+  try {
+    const body = await c.req.json()
+    // ローカル開発用にlocalhost:8080を使用（本番環境ではCloud Run URLを使用）
+    const ML_API_URL = process.env.ML_API_URL || 'http://localhost:8080'
+    
+    const response = await fetch(`${ML_API_URL}/api/technical-ml-predict`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body)
+    })
+    
+    const data = await response.json()
+    return c.json(data)
+  } catch (error: any) {
+    console.error('[PROXY] ML prediction error:', error)
+    return c.json({ error: error.message }, 500)
+  }
+})
+
+// System C: ML価格予測プロキシ
+app.post('/api/proxy/system-c-predict', async (c) => {
+  try {
+    const body = await c.req.json()
+    // ローカル開発用にlocalhost:8080を使用（本番環境ではCloud Run URLを使用）
+    const ML_API_URL = process.env.ML_API_URL || 'http://localhost:8080'
+    
+    // System Cは処理時間が長い（200秒以上）ため、タイムアウトなしで待機
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 300000) // 5分タイムアウト
+    
+    try {
+      const response = await fetch(`${ML_API_URL}/api/system-c-predict`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal
+      })
+      
+      clearTimeout(timeoutId)
+      
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`ML API error: ${response.status} - ${errorText}`)
+      }
+      
+      const data = await response.json()
+      return c.json(data)
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId)
+      if (fetchError.name === 'AbortError') {
+        throw new Error('System C prediction timeout (5 minutes)')
+      }
+      throw fetchError
+    }
+  } catch (error: any) {
+    console.error('[PROXY] System C prediction error:', error)
+    return c.json({ error: error.message }, 500)
+  }
+})
+
+// NASDAQ-100 ランキングプロキシ
+app.post('/api/proxy/nasdaq-ranking', async (c) => {
+  try {
+    const body = await c.req.json()
+    const ML_API_URL = process.env.ML_API_URL || 'http://localhost:8080'
+    
+    const response = await fetch(`${ML_API_URL}/api/nasdaq-ranking`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body)
+    })
+    
+    const data = await response.json()
+    return c.json(data)
+  } catch (error: any) {
+    console.error('[PROXY] NASDAQ ranking error:', error)
+    return c.json({ error: error.message }, 500)
+  }
 })
 
 // 銘柄分析API
@@ -153,6 +269,20 @@ app.post('/api/analyze', async (c) => {
       console.log(`[ML] Training result:`, mlResult.training)
     }
     
+    // 高度なテクニカル分析を取得（System A/B/C）
+    console.log(`[Technical ML] Calling getAdvancedTechnicalAnalysis for ${symbol}...`)
+    const technicalML = env.ML_API_URL ? await getAdvancedTechnicalAnalysis(
+      symbol,
+      env.ML_API_URL,
+      env.ALPHA_VANTAGE_API_KEY,
+      'both'  // System A と System B の両方を取得
+    ) : null
+    console.log(`[Technical ML] Analysis completed:`, {
+      has_result: !!technicalML,
+      system_a_score: technicalML?.system_a?.total_score,
+      system_b_score: technicalML?.system_b?.total_score
+    })
+    
     // GPT-5による最終判断を生成（全データを統合分析）
     console.log('Generating GPT-5 final judgment with all analysis data...')
     let gpt5FinalJudgment = null
@@ -196,6 +326,8 @@ app.post('/api/analyze', async (c) => {
         macro,
         analyst
       },
+      // 高度なテクニカル分析（System A/B/C）
+      technical_ml: technicalML,
       chart_data: {
         dates: stockData.dates.slice(-30),
         prices: stockData.prices.slice(-30)
@@ -2223,6 +2355,172 @@ app.get('/', (c) => {
                   </div>
                 </div>
               </div>
+            </div>
+            \` : ''}
+
+            <!-- System A/B/C テクニカル分析セクション -->
+            \${data.technical_ml && (data.technical_ml.system_a || data.technical_ml.system_b) ? \`
+            <div class="bg-gradient-to-r from-indigo-50 to-cyan-50 p-6 rounded-lg mb-6 border-2 border-indigo-200">
+              <h4 class="font-bold text-xl mb-4 text-center">
+                <i class="fas fa-chart-candlestick mr-2"></i>高度なテクニカル分析スコア
+              </h4>
+              
+              <div class="grid grid-cols-2 gap-6">
+                <!-- System A: シンプル評価 -->
+                \${data.technical_ml.system_a ? \`
+                <div class="bg-white p-6 rounded-lg shadow-md border-2 border-blue-300">
+                  <div class="flex items-center justify-between mb-4">
+                    <h5 class="text-lg font-bold text-blue-700">
+                      <i class="fas fa-star mr-2"></i>System A
+                    </h5>
+                    <span class="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-bold">シンプル評価</span>
+                  </div>
+                  
+                  <div class="space-y-3">
+                    <div>
+                      <p class="text-sm text-gray-600">シグナル</p>
+                      <p class="text-3xl font-bold \${data.technical_ml.system_a.signal_type.includes('買い') ? 'text-green-600' : data.technical_ml.system_a.signal_type.includes('売り') ? 'text-red-600' : 'text-gray-600'}">
+                        \${data.technical_ml.system_a.signal_type}
+                      </p>
+                    </div>
+                    
+                    <div>
+                      <p class="text-sm text-gray-600">信頼度</p>
+                      <div class="flex items-center">
+                        <p class="text-2xl font-bold text-blue-600">\${data.technical_ml.system_a.confidence}%</p>
+                        <div class="ml-3 flex-1">
+                          <div class="w-full bg-gray-200 rounded-full h-2">
+                            <div class="bg-blue-600 h-2 rounded-full" style="width: \${data.technical_ml.system_a.confidence}%"></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <p class="text-sm text-gray-600">総合スコア</p>
+                      <p class="text-2xl font-bold text-blue-700">\${data.technical_ml.system_a.total_score}/100</p>
+                    </div>
+                    
+                    <div class="pt-3 border-t">
+                      <p class="text-xs text-gray-500">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        主要5指標による基本評価
+                      </p>
+                      <p class="text-xs text-gray-400 mt-1">
+                        検出指標: \${data.technical_ml.system_a.explanations.length}個
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                \` : ''}
+                
+                <!-- System B: 高度な複合評価 -->
+                \${data.technical_ml.system_b ? \`
+                <div class="bg-white p-6 rounded-lg shadow-md border-2 border-indigo-300">
+                  <div class="flex items-center justify-between mb-4">
+                    <h5 class="text-lg font-bold text-indigo-700">
+                      <i class="fas fa-brain mr-2"></i>System B
+                    </h5>
+                    <span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-xs font-bold">高度な複合評価</span>
+                  </div>
+                  
+                  <div class="space-y-3">
+                    <div>
+                      <p class="text-sm text-gray-600">シグナル</p>
+                      <p class="text-3xl font-bold \${data.technical_ml.system_b.signal_type.includes('買い') ? 'text-green-600' : data.technical_ml.system_b.signal_type.includes('売り') ? 'text-red-600' : 'text-gray-600'}">
+                        \${data.technical_ml.system_b.signal_type}
+                      </p>
+                    </div>
+                    
+                    <div>
+                      <p class="text-sm text-gray-600">信頼度</p>
+                      <div class="flex items-center">
+                        <p class="text-2xl font-bold text-indigo-600">\${data.technical_ml.system_b.confidence}%</p>
+                        <div class="ml-3 flex-1">
+                          <div class="w-full bg-gray-200 rounded-full h-2">
+                            <div class="bg-indigo-600 h-2 rounded-full" style="width: \${data.technical_ml.system_b.confidence}%"></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <p class="text-sm text-gray-600">総合スコア</p>
+                      <p class="text-2xl font-bold text-indigo-700">\${data.technical_ml.system_b.total_score}/100</p>
+                    </div>
+                    
+                    \${data.technical_ml.system_b.category_scores ? \`
+                    <div class="pt-3 border-t">
+                      <p class="text-xs text-gray-700 font-bold mb-2">カテゴリー別スコア:</p>
+                      <div class="grid grid-cols-2 gap-2 text-xs">
+                        \${data.technical_ml.system_b.category_scores.trend !== undefined ? \`
+                        <div>
+                          <span class="text-gray-600">トレンド:</span>
+                          <span class="font-bold text-blue-600 ml-1">\${data.technical_ml.system_b.category_scores.trend}</span>
+                        </div>
+                        \` : ''}
+                        \${data.technical_ml.system_b.category_scores.momentum !== undefined ? \`
+                        <div>
+                          <span class="text-gray-600">モメンタム:</span>
+                          <span class="font-bold text-green-600 ml-1">\${data.technical_ml.system_b.category_scores.momentum}</span>
+                        </div>
+                        \` : ''}
+                        \${data.technical_ml.system_b.category_scores.volatility !== undefined ? \`
+                        <div>
+                          <span class="text-gray-600">ボラティリティ:</span>
+                          <span class="font-bold text-yellow-600 ml-1">\${data.technical_ml.system_b.category_scores.volatility}</span>
+                        </div>
+                        \` : ''}
+                        \${data.technical_ml.system_b.category_scores.volume !== undefined ? \`
+                        <div>
+                          <span class="text-gray-600">出来高:</span>
+                          <span class="font-bold text-purple-600 ml-1">\${data.technical_ml.system_b.category_scores.volume}</span>
+                        </div>
+                        \` : ''}
+                      </div>
+                    </div>
+                    \` : ''}
+                    
+                    <div class="pt-3 border-t">
+                      <p class="text-xs text-gray-500">
+                        <i class="fas fa-microchip mr-1"></i>
+                        20+指標 / 動的重み付け / 相関補正
+                      </p>
+                      <p class="text-xs text-gray-400 mt-1">
+                        検出指標: \${data.technical_ml.system_b.explanations.length}個 | リスクスコア: \${data.technical_ml.system_b.risk_score}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                \` : ''}
+              </div>
+              
+              <!-- System A/B 比較分析 -->
+              \${data.technical_ml.system_a && data.technical_ml.system_b ? \`
+              <div class="mt-6 bg-white p-4 rounded-lg">
+                <h6 class="font-bold text-sm text-gray-700 mb-3">
+                  <i class="fas fa-balance-scale mr-2"></i>System A vs System B 比較
+                </h6>
+                <div class="grid grid-cols-2 gap-4 text-xs">
+                  <div>
+                    <p class="font-bold text-blue-700 mb-1">System A (シンプル評価):</p>
+                    <ul class="space-y-1 text-gray-600">
+                      <li>✓ 主要5指標のみ使用</li>
+                      <li>✓ 高速計算</li>
+                      <li>✓ 初心者向け</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <p class="font-bold text-indigo-700 mb-1">System B (高度な複合評価):</p>
+                    <ul class="space-y-1 text-gray-600">
+                      <li>✓ 20+指標を統合分析</li>
+                      <li>✓ 市場環境に応じた動的重み付け</li>
+                      <li>✓ プロ投資家向け</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+              \` : ''}
             </div>
             \` : ''}
 

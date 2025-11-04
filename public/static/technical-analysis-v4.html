@@ -7,9 +7,9 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>テクニカル分析スクリーナー v3.0 INDENT FIXED 055945 - Alpha Vantage</title>
-  <script src="https://cdn.tailwindcss.com?v=20250128b"></script>
+  <script src="https://cdn.tailwindcss.com?v=20250204c"></script>
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js?v=20250128b"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js?v=20250204c"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
   <style>
     .loader {
@@ -37,9 +37,56 @@
     .score-neutral { background-color: #6b7280; color: white; }
     .score-sell { background-color: #ef4444; color: white; }
     .score-strong-sell { background-color: #7f1d1d; color: white; }
+    /* ナビゲーションバーのスタイル */
+    .nav-bar {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 1rem 2rem;
+      margin-bottom: 2rem;
+      border-radius: 0.5rem;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .nav-links {
+      display: flex;
+      gap: 2rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .nav-link {
+      color: white;
+      text-decoration: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 0.375rem;
+      font-weight: 600;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .nav-link:hover {
+      background-color: rgba(255, 255, 255, 0.2);
+      transform: translateY(-2px);
+    }
+    .nav-link.active {
+      background-color: rgba(147, 112, 219, 0.8);
+      border-bottom: 3px solid white;
+    }
   </style>
 </head>
 <body class="bg-gray-100">
+  <!-- ナビゲーションバー -->
+  <nav class="nav-bar">
+    <div class="nav-links">
+      <a href="/static/technical-analysis-v4.html" class="nav-link active">
+        <i class="fas fa-chart-bar"></i>
+        📊 テクニカル分析スクリーナー
+      </a>
+      <a href="/static/nasdaq-ranking.html" class="nav-link">
+        <i class="fas fa-trophy"></i>
+        🏆 NASDAQ-100ランキング
+      </a>
+    </div>
+  </nav>
+
   <div class="container mx-auto px-4 py-8 max-w-7xl">
     <!-- ヘッダー -->
     <div class="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-8 rounded-lg shadow-lg mb-8">
@@ -524,7 +571,9 @@
     }
     
     function displaySystemC(data) {
-      if (!data || !data.training_metrics) {
+      console.log('[displaySystemC] Received data:', data)
+      
+      if (!data || !data.training || !data.training.metrics) {
         document.getElementById('system-c-results').innerHTML = `
           <div class="bg-gray-100 border-2 border-gray-300 rounded-lg p-6 text-center">
             <i class="fas fa-robot text-gray-400 text-6xl mb-4"></i>
@@ -535,17 +584,54 @@
         return
       }
       
-      const training = data.training_metrics
+      const training = data.training.metrics
       const future = data.future_predictions
-      const backfit = data.backfit_predictions
-      const current_price = data.current_price
+      const backfit = data.training.backfit_predictions
+      const featureImportances = data.training.feature_importances
+      const current_price = future && future.predictions && future.predictions.length > 0 ? future.predictions[0] : 0
       
       const html = `
         <div class="bg-gradient-to-r from-green-50 to-teal-50 p-6 rounded-lg mb-6">
           <h2 class="text-3xl font-bold mb-4 text-green-800">
-            <i class="fas fa-robot mr-2"></i>システムC: ML予測（125特徴量 + LightGBM）
+            <i class="fas fa-robot mr-2"></i>システムC: ML予測（107特徴量 + LightGBM）
           </h2>
-          <p class="text-gray-700 mb-6">機械学習による高度な価格予測とバックフィット検証</p>
+          <p class="text-gray-700 mb-6">機械学習による未来14日予測 + 過去30日バックフィット検証</p>
+          
+          <!-- ML学習プロセス説明 -->
+          ${data.ml_training_process ? `
+          <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded mb-6">
+            <h3 class="font-bold text-lg text-blue-800 mb-3">
+              <i class="fas fa-info-circle mr-2"></i>ML学習プロセスの説明
+            </h3>
+            <p class="text-sm text-gray-700 mb-3">${data.ml_training_process.overview}</p>
+            <details class="text-sm">
+              <summary class="cursor-pointer font-semibold text-blue-700 hover:text-blue-900 mb-2">
+                詳細な学習ステップを表示 <i class="fas fa-chevron-down ml-1"></i>
+              </summary>
+              <div class="mt-3 space-y-3">
+                ${data.ml_training_process.steps.map(step => `
+                  <div class="bg-white p-3 rounded border border-blue-200">
+                    <p class="font-bold text-blue-800">ステップ${step.step}: ${step.name}</p>
+                    <p class="text-gray-700 text-xs mt-1">${step.description}</p>
+                  </div>
+                `).join('')}
+              </div>
+              <div class="mt-4 bg-white p-3 rounded border border-blue-200">
+                <p class="font-bold text-blue-800 mb-2">評価指標の意味</p>
+                <ul class="text-xs text-gray-700 space-y-1">
+                  <li><strong>MAE:</strong> ${data.ml_training_process.metrics_explanation.mae}</li>
+                  <li><strong>RMSE:</strong> ${data.ml_training_process.metrics_explanation.rmse}</li>
+                  <li><strong>R²:</strong> ${data.ml_training_process.metrics_explanation.r2}</li>
+                  <li><strong>MAPE:</strong> ${data.ml_training_process.metrics_explanation.mape}</li>
+                </ul>
+              </div>
+              <div class="mt-3 bg-white p-3 rounded border border-blue-200">
+                <p class="font-bold text-blue-800 mb-1">バックフィット検証について</p>
+                <p class="text-xs text-gray-700">${data.ml_training_process.backfit_explanation.description}</p>
+              </div>
+            </details>
+          </div>
+          ` : ''}
           
           <!-- 学習サマリー -->
           <div class="grid grid-cols-4 gap-4 mb-6">
@@ -568,21 +654,21 @@
           </div>
           
           <!-- 未来予測 -->
-          ${future ? `
+          ${future && future.predictions && future.predictions.length > 0 ? `
           <div class="bg-white p-6 rounded-lg shadow mb-6">
             <h3 class="font-bold text-xl mb-4 text-gray-800">
-              <i class="fas fa-chart-line mr-2"></i>未来30日予測
+              <i class="fas fa-chart-line mr-2"></i>未来14日予測
             </h3>
             <canvas id="futurePredictionChart" style="max-height: 400px;"></canvas>
             <div class="grid grid-cols-3 gap-4 mt-4">
               <div class="bg-blue-50 p-4 rounded text-center">
-                <p class="text-sm text-gray-600 mb-1">30日後予測価格</p>
-                <p class="text-2xl font-bold text-blue-600">$${future.target_price_30d.toFixed(2)}</p>
+                <p class="text-sm text-gray-600 mb-1">14日後予測価格</p>
+                <p class="text-2xl font-bold text-blue-600">$${future.predictions[future.predictions.length - 1].toFixed(2)}</p>
               </div>
               <div class="bg-green-50 p-4 rounded text-center">
                 <p class="text-sm text-gray-600 mb-1">変化率</p>
                 <p class="text-2xl font-bold text-green-600">
-                  ${((future.target_price_30d - current_price) / current_price * 100).toFixed(2)}%
+                  ${((future.predictions[future.predictions.length - 1] - future.predictions[0]) / future.predictions[0] * 100).toFixed(2)}%
                 </p>
               </div>
               <div class="bg-purple-50 p-4 rounded text-center">
@@ -630,14 +716,14 @@
       document.getElementById('system-c-results').innerHTML = html
       
       // チャート描画
-      if (future) {
-        renderFuturePredictionChart(future, current_price)
+      if (future && future.predictions) {
+        renderFuturePredictionChart(future, future.predictions[0])
       }
       if (backfit) {
         renderBackfitChart(backfit)
       }
-      if (data.feature_importances) {
-        renderFeatureImportanceChart(data.feature_importances)
+      if (featureImportances) {
+        renderFeatureImportanceChart(featureImportances)
       }
     }
     
@@ -763,32 +849,91 @@
     
     function renderFeatureImportanceChart(importances) {
       const ctx = document.getElementById('featureImportanceChart').getContext('2d')
-      const features = Object.keys(importances).slice(0, 10)
-      const values = Object.values(importances).slice(0, 10)
+      
+      // importancesが配列の場合（[{feature: 'xxx', importance: 0.123}, ...]）
+      let features, values
+      
+      if (Array.isArray(importances)) {
+        // Top 10のみ取得
+        const top10 = importances.slice(0, 10)
+        features = top10.map(item => item.feature || item.name || 'Unknown')
+        values = top10.map(item => item.importance || item.gain || 0)
+      } else if (typeof importances === 'object') {
+        // オブジェクトの場合（{feature1: 0.123, feature2: 0.456, ...}）
+        const entries = Object.entries(importances).slice(0, 10)
+        features = entries.map(([key]) => key)
+        values = entries.map(([, value]) => value)
+      } else {
+        console.error('Invalid importances format:', importances)
+        return
+      }
+      
+      // 色のグラデーション（重要度が高いほど濃い色）
+      const maxValue = Math.max(...values)
+      const colors = values.map(val => {
+        const intensity = val / maxValue
+        const r = Math.floor(99 + (34 - 99) * intensity)
+        const g = Math.floor(102 + (197 - 102) * intensity)
+        const b = Math.floor(241 + (94 - 241) * intensity)
+        return `rgba(${r}, ${g}, ${b}, 0.8)`
+      })
       
       new Chart(ctx, {
         type: 'bar',
         data: {
           labels: features,
           datasets: [{
-            label: '重要度',
+            label: '重要度スコア',
             data: values,
-            backgroundColor: 'rgba(99, 102, 241, 0.7)',
-            borderColor: 'rgb(99, 102, 241)',
-            borderWidth: 1
+            backgroundColor: colors,
+            borderColor: colors.map(color => color.replace('0.8', '1')),
+            borderWidth: 2
           }]
         },
         options: {
-          indexAxis: 'y',
+          indexAxis: 'y',  // 横棒グラフ
           responsive: true,
+          maintainAspectRatio: false,
           plugins: {
             legend: { display: false },
-            title: { display: false }
+            title: { 
+              display: true,
+              text: '株価予測に最も影響を与える10個の特徴量',
+              font: { size: 14, weight: 'bold' },
+              color: '#374151'
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const value = context.parsed.x
+                  const total = values.reduce((a, b) => a + b, 0)
+                  const percentage = ((value / total) * 100).toFixed(1)
+                  return `重要度: ${value.toFixed(4)} (${percentage}%)`
+                }
+              }
+            }
           },
           scales: {
             x: {
               beginAtZero: true,
-              title: { display: true, text: '重要度スコア' }
+              title: { 
+                display: true, 
+                text: '重要度スコア（値が高いほど予測への影響が大きい）',
+                font: { size: 12 },
+                color: '#6b7280'
+              },
+              grid: {
+                color: 'rgba(0, 0, 0, 0.05)'
+              }
+            },
+            y: {
+              grid: {
+                display: false
+              },
+              ticks: {
+                font: { size: 11 },
+                color: '#374151'
+              }
             }
           }
         }
