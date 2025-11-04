@@ -40,7 +40,7 @@ app.post('/api/proxy/technical-analysis', async (c) => {
   try {
     const body = await c.req.json()
     // ローカル開発用にlocalhost:8080を使用（本番環境ではCloud Run URLを使用）
-    const ML_API_URL = process.env.ML_API_URL || 'http://localhost:8080'
+    const ML_API_URL = process.env.ML_API_URL || 'http://localhost:8001'
     
     const response = await fetch(`${ML_API_URL}/api/technical-analysis`, {
       method: 'POST',
@@ -62,7 +62,7 @@ app.post('/api/proxy/technical-ml-predict', async (c) => {
   try {
     const body = await c.req.json()
     // ローカル開発用にlocalhost:8080を使用（本番環境ではCloud Run URLを使用）
-    const ML_API_URL = process.env.ML_API_URL || 'http://localhost:8080'
+    const ML_API_URL = process.env.ML_API_URL || 'http://localhost:8001'
     
     const response = await fetch(`${ML_API_URL}/api/technical-ml-predict`, {
       method: 'POST',
@@ -84,8 +84,8 @@ app.post('/api/proxy/technical-ml-predict', async (c) => {
 app.post('/api/proxy/system-c-predict', async (c) => {
   try {
     const body = await c.req.json()
-    // ローカル開発用にlocalhost:8080を使用（本番環境ではCloud Run URLを使用）
-    const ML_API_URL = process.env.ML_API_URL || 'http://localhost:8080'
+    // ローカル開発用にlocalhost:8001を使用（本番環境ではCloud Run URLを使用）
+    const ML_API_URL = process.env.ML_API_URL || 'http://localhost:8001'
     
     // System Cは処理時間が長い（200秒以上）ため、タイムアウトなしで待機
     const controller = new AbortController()
@@ -127,7 +127,7 @@ app.post('/api/proxy/system-c-predict', async (c) => {
 app.post('/api/proxy/nasdaq-ranking', async (c) => {
   try {
     const body = await c.req.json()
-    const ML_API_URL = process.env.ML_API_URL || 'http://localhost:8080'
+    const ML_API_URL = process.env.ML_API_URL || 'http://localhost:8001'
     
     const response = await fetch(`${ML_API_URL}/api/nasdaq-ranking`, {
       method: 'POST',
