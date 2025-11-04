@@ -595,7 +595,7 @@
           <h2 class="text-3xl font-bold mb-4 text-green-800">
             <i class="fas fa-robot mr-2"></i>システムC: ML予測（107特徴量 + LightGBM）
           </h2>
-          <p class="text-gray-700 mb-6">機械学習による未来14日予測 + 過去30日バックフィット検証</p>
+          <p class="text-gray-700 mb-6">機械学習による未来7日予測（Direct LGBM + Decay） + 過去30日バックフィット検証</p>
           
           <!-- ML学習プロセス説明 -->
           ${data.ml_training_process ? `
@@ -657,7 +657,7 @@
           ${future && future.predictions && future.predictions.length > 0 ? `
           <div class="bg-white p-6 rounded-lg shadow mb-6">
             <h3 class="font-bold text-xl mb-4 text-gray-800">
-              <i class="fas fa-chart-line mr-2"></i>未来14日予測
+              <i class="fas fa-chart-line mr-2"></i>未来7日予測
             </h3>
             <canvas id="futurePredictionChart" style="max-height: 400px;"></canvas>
             <div class="grid grid-cols-3 gap-4 mt-4">

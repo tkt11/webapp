@@ -26,9 +26,9 @@ const app = new Hono<{ Bindings: Env }>()
 // CORS設定
 app.use('/api/*', cors())
 
-// 静的ファイルの配信（/static/* パス）
-// Cloudflare Pagesでは dist/ がrootになる
-app.get('/static/*', serveStatic({ root: './' }))
+// 静的ファイルの配信
+// Note: serveStaticがうまく動作しないため、Cloudflare Pagesのassets機能に依存
+// dist/static/配下のファイルは自動的に /static/* で配信される
 
 // ヘルスチェック
 app.get('/api/health', (c) => {
