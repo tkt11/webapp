@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>NASDAQ-100 ランキング - System A/B スクリーニング</title>
-  <script src="https://cdn.tailwindcss.com?v=20250204d"></script>
+  <script src="https://cdn.tailwindcss.com?v=20250204e"></script>
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js?v=20250204d"></script>
   <style>
@@ -312,6 +312,18 @@
     }
     
     function displayResults(results, systemName, totalTime, successCount, failCount) {
+      // resultsが空またはnullの場合のチェック
+      if (!results || results.length === 0) {
+        document.getElementById('results').innerHTML = `
+          <div class="bg-red-50 border-2 border-red-300 rounded-lg p-6 text-center">
+            <i class="fas fa-times-circle text-red-600 text-6xl mb-4"></i>
+            <p class="text-lg text-gray-800 mb-2">表示可能な結果がありません</p>
+            <p class="text-sm text-gray-600">成功: ${successCount || 0}件 / 失敗: ${failCount || 0}件</p>
+          </div>
+        `;
+        return;
+      }
+      
       document.getElementById('results').style.display = 'block';
       
       // 統計情報
@@ -361,7 +373,10 @@
       `;
       
       results.forEach((item, index) => {
-        const signalBadge = getSignalBadge(item.signal);
+        // itemがnullまたはundefinedの場合はスキップ
+        if (!item) return;
+        
+        const signalBadge = getSignalBadge(item.signal || '中立');
         const rankBadge = index < 3 ? `<span class="text-2xl">${['🥇', '🥈', '🥉'][index]}</span>` : `${index + 1}`;
         
         // ゴールデンクロススコアの表示
@@ -413,6 +428,22 @@
         '買い': '<span class="score-badge score-buy">買い</span>',
         '中立': '<span class="score-badge score-neutral">中立</span>',
         '売り': '<span class="score-badge score-sell">売り</span>',
+        '強い売り': '<span class="score-badge score-strong-sell">強い売り</span>'
+      };
+      return badges[signal] || '<span class="score-badge score-neutral">-</span>';
+    }
+    
+    function getScoreColor(score) {
+      if (score >= 80) return '#10b981';
+      if (score >= 65) return '#3b82f6';
+      if (score >= 35) return '#6b7280';
+      if (score >= 20) return '#ef4444';
+      return '#7f1d1d';
+    }
+  </script>
+</body>
+</html>
+e-sell">売り</span>',
         '強い売り': '<span class="score-badge score-strong-sell">強い売り</span>'
       };
       return badges[signal] || '<span class="score-badge score-neutral">-</span>';
