@@ -354,7 +354,7 @@
       document.getElementById('ranking-stats').innerHTML = statsHTML;
       
       // ランキングテーブル
-      const mode = document.getElementById('mode-select').value;
+      const isAdvanced = systemName.includes('システムB') || systemName.includes('Advanced');
       
       let tableHTML = `
         <div class="overflow-x-auto">
@@ -366,7 +366,7 @@
                 <th class="px-4 py-3 text-right">スコア</th>
                 <th class="px-4 py-3 text-center">シグナル</th>
                 <th class="px-4 py-3 text-right">信頼度</th>
-                ${mode === 'advanced' ? '<th class="px-4 py-3 text-center">市場環境</th><th class="px-4 py-3 text-center">GC指標</th>' : '<th class="px-4 py-3 text-center">GC指標</th>'}
+                ${isAdvanced ? '<th class="px-4 py-3 text-center">市場環境</th><th class="px-4 py-3 text-center">GC指標</th>' : '<th class="px-4 py-3 text-center">GC指標</th>'}
               </tr>
             </thead>
             <tbody>
@@ -402,7 +402,7 @@
             </td>
             <td class="px-4 py-3 text-center">${signalBadge}</td>
             <td class="px-4 py-3 text-right">${item.confidence ? item.confidence.toFixed(0) : 0}%</td>
-            ${mode === 'advanced' ? `<td class="px-4 py-3 text-center">${item.market_regime ? `<span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">${item.market_regime}</span>` : '<span class="text-gray-400">-</span>'}</td>` : ''}
+            ${isAdvanced ? `<td class="px-4 py-3 text-center">${item.market_regime ? `<span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">${item.market_regime}</span>` : '<span class="text-gray-400">-</span>'}</td>` : ''}
             <td class="px-4 py-3 text-center">${gcDisplay}</td>
           </tr>
         `;
