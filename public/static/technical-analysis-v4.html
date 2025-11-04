@@ -731,11 +731,19 @@
     function renderFuturePredictionChart(future, current_price) {
       const ctx = document.getElementById('futurePredictionChart').getContext('2d')
       
+      // 既存のチャートを破棄（重要：古いチャートが残るのを防ぐ）
+      const existingChart = Chart.getChart('futurePredictionChart')
+      if (existingChart) {
+        existingChart.destroy()
+      }
+      
       // 現在価格を追加（起点として）
       const allDates = ['今日', ...future.dates]
       const allPredictions = [current_price, ...future.predictions]
       const allUpper = [current_price, ...future.upper_bound]
       const allLower = [current_price, ...future.lower_bound]
+      
+      console.log('[renderFuturePredictionChart] current_price:', current_price, 'predictions:', future.predictions.slice(0, 3))
       
       new Chart(ctx, {
         type: 'line',
@@ -805,6 +813,13 @@
     
     function renderBackfitChart(backfit) {
       const ctx = document.getElementById('backfitChart').getContext('2d')
+      
+      // 既存のチャートを破棄
+      const existingChart = Chart.getChart('backfitChart')
+      if (existingChart) {
+        existingChart.destroy()
+      }
+      
       new Chart(ctx, {
         type: 'line',
         data: {
@@ -850,6 +865,12 @@
     
     function renderFeatureImportanceChart(importances) {
       const ctx = document.getElementById('featureImportanceChart').getContext('2d')
+      
+      // 既存のチャートを破棄
+      const existingChart = Chart.getChart('featureImportanceChart')
+      if (existingChart) {
+        existingChart.destroy()
+      }
       
       // importancesが配列の場合（[{feature: 'xxx', importance: 0.123}, ...]）
       let features, values
