@@ -7,9 +7,9 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>NASDAQ-100 ランキング - System A/B スクリーニング</title>
-  <script src="https://cdn.tailwindcss.com?v=20250204g"></script>
+  <script src="https://cdn.tailwindcss.com?v=20250204h"></script>
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js?v=20250204g"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js?v=20250204h"></script>
   <style>
     .loader {
       border: 4px solid #f3f3f3;
@@ -249,7 +249,7 @@
           const systemData = mode === 'simple' ? data.system_a : data.system_b;
           console.log(`[DEBUG] ${symbol} systemData:`, systemData);
           
-          if (systemData) {
+          if (systemData && systemData.total_score != null) {
             const resultItem = {
               symbol: symbol,
               score: systemData.total_score,
@@ -270,7 +270,7 @@
             `;
           } else {
             failCount++;
-            console.error(`No data returned for ${symbol}`);
+            console.warn(`[WARN] No valid data returned for ${symbol}:`, {hasSystemData: !!systemData, systemData});
           }
           
         } catch (error) {
@@ -308,9 +308,10 @@
       
       console.log(`[DEBUG] Total results collected: ${results.length}`);
       console.log(`[DEBUG] First 3 results:`, results.slice(0, 3));
+      console.log(`[DEBUG] Success: ${successCount}, Fail: ${failCount}`);
       
       // スコア順にソート
-      results.sort((a, b) => b.score - a.score);
+      results.sort((a, b) => (b.score || 0) - (a.score || 0));
       
       // TOP 30のみ表示
       const top30 = results.slice(0, 30);
@@ -365,8 +366,8 @@
       console.log(`[DEBUG] Stats HTML updated`);
       
       // ランキングテーブル
-      const isAdvanced = systemName.includes('システムB') || systemName.includes('Advanced');
-      console.log(`[DEBUG] Building table, isAdvanced: ${isAdvanced}`);
+      const isAdvanced = (systemName && (systemName.includes('システムB') || systemName.includes('Advanced'))) || false;
+      console.log(`[DEBUG] Building table, isAdvanced: ${isAdvanced}, systemName: ${systemName}`);
       
       let tableHTML = `
         <div class="overflow-x-auto">
@@ -386,7 +387,10 @@
       
       results.forEach((item, index) => {
         // itemがnullまたはundefinedの場合はスキップ
-        if (!item) return;
+        if (!item || !item.symbol || item.score == null) {
+          console.warn(`[WARN] Skipping invalid item at index ${index}:`, item);
+          return;
+        }
         
         const signalBadge = getSignalBadge(item.signal || '中立');
         const rankBadge = index < 3 ? `<span class="text-2xl">${['🥇', '🥈', '🥉'][index]}</span>` : `${index + 1}`;
@@ -410,10 +414,10 @@
               <div class="font-bold text-blue-600">${item.symbol}</div>
             </td>
             <td class="px-4 py-3 text-right">
-              <div class="text-2xl font-bold" style="color: ${getScoreColor(item.score)}">${item.score.toFixed(1)}</div>
+              <div class="text-2xl font-bold" style="color: ${getScoreColor(item.score || 0)}">${(item.score || 0).toFixed(1)}</div>
             </td>
             <td class="px-4 py-3 text-center">${signalBadge}</td>
-            <td class="px-4 py-3 text-right">${item.confidence ? item.confidence.toFixed(0) : 0}%</td>
+            <td class="px-4 py-3 text-right">${(item.confidence != null) ? item.confidence.toFixed(0) : 0}%</td>
             ${isAdvanced ? `<td class="px-4 py-3 text-center">${item.market_regime ? `<span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">${item.market_regime}</span>` : '<span class="text-gray-400">-</span>'}</td>` : ''}
             <td class="px-4 py-3 text-center">${gcDisplay}</td>
           </tr>
