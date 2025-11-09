@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>NASDAQ-100 ランキング - System A/B スクリーニング</title>
+  <script src="https://cdn.tailwindcss.com?v=20250204j"></script>
+  <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js?v=20250204h"></script>
+  <style>
+    .loader {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #3B82F6;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      animation: spin 1s linear infinite;
+      margin: 20px auto;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .score-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      font-weight: bold;
+      font-size: 0.875rem;
+    }
+    .score-strong-buy { background-color: #10b981; color: white; }
+    .score-buy { background-color: #3b82f6; color: white; }
+    .score-neutral { background-color: #6b7280; color: white; }
+    .score-sell { background-color: #ef4444; color: white; }
+    .score-strong-sell { background-color: #7f1d1d; color: white; }
+    
+    /* ナビゲーションバーのスタイル */
+    .nav-bar {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 1rem 2rem;
+      margin-bottom: 2rem;
+      border-radius: 0.5rem;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .nav-links {
+      display: flex;
+      gap: 2rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .nav-link {
+      color: white;
+      text-decoration: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 0.375rem;
+      font-weight: 600;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .nav-link:hover {
+      background-color: rgba(255, 255, 255, 0.2);
+      transform: translateY(-2px);
+    }
+    .nav-link.active {
+      background-color: rgba(147, 112, 219, 0.8);
+      border-bottom: 3px solid white;
+    }
+  </style>
+</head>
+<body class="bg-gray-100">
+  <!-- ナビゲーションバー -->
+  <nav class="nav-bar">
+    <div class="nav-links">
+      <a href="/static/technical-analysis-v4.html" class="nav-link">
+        <i class="fas fa-chart-bar"></i>
+        📊 テクニカル分析スクリーナー
+      </a>
+      <a href="/static/nasdaq-ranking.html" class="nav-link active">
+        <i class="fas fa-trophy"></i>
+        🏆 NASDAQ-100ランキング
+      </a>
+    </div>
+  </nav>
+
+  <div class="container mx-auto px-4 py-8 max-w-7xl">
+    <!-- ヘッダー -->
+    <div class="bg-gradient-to-r from-yellow-500 to-orange-600 text-white p-8 rounded-lg shadow-lg mb-8">
+      <h1 class="text-4xl font-bold mb-2">
+        <i class="fas fa-trophy mr-3"></i>
+        NASDAQ-100 ランキング
+      </h1>
+      <p class="text-xl opacity-90">System A/B による100銘柄スクリーニング</p>
+      <p class="mt-2 text-sm opacity-75">
+        システムA（シンプル5指標） • システムB（高度な複合評価20+指標）
+      </p>
+    </div>
+
+    <!-- 設定エリア -->
+    <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+      <h2 class="text-2xl font-bold mb-4">
+        <i class="fas fa-sliders-h mr-2 text-yellow-600"></i>
+        スクリーニング設定
+      </h2>
+      
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div>
+          <label class="block text-sm font-semibold mb-2">分析システム</label>
+          <select id="system-select" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent">
+            <option value="simple">システムA（シンプル5指標） - 高速</option>
+            <option value="advanced">システムB（高度な複合評価） - 詳細</option>
+          </select>
+        </div>
+        
+        <div>
+          <label class="block text-sm font-semibold mb-2">Alpha Vantage API Key</label>
+          <input 
+            type="text" 
+            id="api-key-input" 
+            placeholder="Your Alpha Vantage API Key" 
+            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+          />
+        </div>
+      </div>
+      
+      <div class="bg-yellow-50 border-2 border-yellow-300 rounded-lg p-4 mb-4">
+        <h3 class="font-bold mb-2">
+          <i class="fas fa-info-circle text-yellow-600"></i>
+          処理時間の目安
+        </h3>
+        <ul class="text-sm text-gray-700 space-y-1">
+          <li><strong>システムA:</strong> 約7-8分（100銘柄、軽量分析）</li>
+          <li><strong>システムB:</strong> 約13-15分（100銘柄、詳細分析）</li>
+          <li><strong>成功率:</strong> 約35-40%（APIレート制限により一部失敗は正常）</li>
+        </ul>
+      </div>
+      
+      <button 
+        onclick="startRanking()" 
+        class="w-full bg-gradient-to-r from-yellow-500 to-orange-600 hover:from-yellow-600 hover:to-orange-700 text-white px-8 py-4 rounded-lg font-semibold transition text-lg"
+      >
+        <i class="fas fa-play mr-2"></i>ランキング開始（100銘柄を分析）
+      </button>
+    </div>
+
+    <!-- ローディング表示 -->
+    <div id="loading" style="display:none;" class="bg-white rounded-lg shadow-md p-8 mb-6">
+      <div class="loader"></div>
+      <p id="loading-message" class="text-center text-gray-600 text-lg">分析中...</p>
+      <p class="text-center text-gray-500 text-sm mt-2">
+        NASDAQ-100銘柄を順次分析しています。しばらくお待ちください。
+      </p>
+      <div id="progress-info" class="mt-4 text-center text-sm text-gray-600"></div>
+    </div>
+
+    <!-- 結果表示エリア -->
+    <div id="results" style="display:none;">
+      <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
+        <h2 class="text-2xl font-bold mb-4">
+          <i class="fas fa-list-ol mr-2 text-yellow-600"></i>
+          TOP 30 ランキング
+        </h2>
+        <div id="ranking-stats" class="mb-4"></div>
+        <div id="ranking-table"></div>
+      </div>
+    </div>
+
+    <!-- エラー表示 -->
+    <div id="error-display" style="display:none;" class="bg-red-50 border-2 border-red-300 rounded-lg p-6 mb-6">
+      <div class="flex items-start">
+        <i class="fas fa-exclamation-circle text-red-500 text-3xl mr-4"></i>
+        <div>
+          <h3 class="text-xl font-bold text-red-800 mb-2">エラーが発生しました</h3>
+          <p id="error-message" class="text-red-700"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // NASDAQ-100銘柄リスト（簡略版、実際は100銘柄）
+    const NASDAQ100_SYMBOLS = [
+      'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'AVGO', 'COST', 'NFLX',
+      'ADBE', 'PEP', 'CSCO', 'CMCSA', 'TMUS', 'INTC', 'AMD', 'QCOM', 'TXN', 'INTU',
+      'HON', 'AMGN', 'AMAT', 'ISRG', 'SBUX', 'BKNG', 'ADP', 'GILD', 'ADI', 'VRTX',
+      'REGN', 'MDLZ', 'LRCX', 'PANW', 'MU', 'PYPL', 'KLAC', 'SNPS', 'CDNS', 'MRVL',
+      'CSX', 'ABNB', 'NXPI', 'ORLY', 'ASML', 'WDAY', 'ADSK', 'MELI', 'CHTR', 'AEP',
+      'FTNT', 'MNST', 'PCAR', 'CPRT', 'ROST', 'PAYX', 'KDP', 'MCHP', 'ODFL', 'FAST',
+      'DXCM', 'EA', 'BKR', 'VRSK', 'EXC', 'CTSH', 'KHC', 'GEHC', 'CSGP', 'IDXX',
+      'CCEP', 'ANSS', 'ON', 'DDOG', 'XEL', 'TTWO', 'FANG', 'CDW', 'ZS', 'BIIB',
+      'CTAS', 'ILMN', 'GFS', 'MDB', 'WBD', 'MRNA', 'ARM', 'SMCI', 'TEAM', 'CRWD',
+      'WBA', 'PDD', 'DASH', 'LULU', 'ZM', 'ALGN', 'ENPH', 'RIVN', 'JD', 'LCID'
+    ];
+
+    // プロキシ経由でML APIにアクセス（ブラウザからlocalhost:8080に直接接続できないため）
+    const USE_PROXY = true;
+
+    async function startRanking() {
+      const system = document.getElementById('system-select').value;
+      const apiKey = document.getElementById('api-key-input').value.trim();
+      
+      if (!apiKey) {
+        alert('Alpha Vantage API Keyを入力してください');
+        return;
+      }
+      
+      // UIリセット
+      document.getElementById('results').style.display = 'none';
+      document.getElementById('error-display').style.display = 'none';
+      document.getElementById('loading').style.display = 'block';
+      
+      const mode = system === 'simple' ? 'simple' : 'advanced';
+      const systemName = system === 'simple' ? 'システムA' : 'システムB';
+      
+      document.getElementById('loading-message').textContent = `${systemName}で分析中...`;
+      
+      const results = [];
+      let successCount = 0;
+      let failCount = 0;
+      const startTime = Date.now();
+      
+      for (let i = 0; i < NASDAQ100_SYMBOLS.length; i++) {
+        const symbol = NASDAQ100_SYMBOLS[i];
+        
+        // 現在の銘柄を表示（処理開始時）
+        document.getElementById('progress-info').innerHTML = `
+          進捗: ${successCount + failCount}/${NASDAQ100_SYMBOLS.length} (${Math.round(((successCount + failCount) / NASDAQ100_SYMBOLS.length) * 100)}%)
+          <br>成功: <span class="text-green-600 font-bold">${successCount}</span> | 失敗: <span class="text-red-600 font-bold">${failCount}</span>
+          <br>処理中: <strong class="text-blue-600">${symbol}</strong> (${i + 1}/${NASDAQ100_SYMBOLS.length})
+        `;
+        
+        try {
+          // プロキシ経由でリクエスト
+          const response = await axios.post('/api/proxy/technical-analysis', {
+            symbol: symbol,
+            alpha_vantage_api_key: apiKey,
+            mode: mode,
+            timeframe: 'medium'
+          }, {
+            timeout: 30000  // 30秒タイムアウト
+          });
+          
+          const data = response.data;
+          console.log(`[DEBUG] ${symbol} response:`, data);
+          const systemData = mode === 'simple' ? data.system_a : data.system_b;
+          console.log(`[DEBUG] ${symbol} systemData:`, systemData);
+          
+          if (systemData && systemData.total_score != null) {
+            const resultItem = {
+              symbol: symbol,
+              score: systemData.total_score,
+              signal: systemData.signal_type,
+              confidence: systemData.confidence,
+              market_regime: systemData.market_regime || null,
+              golden_cross_score: systemData.category_scores?.golden_cross || systemData.golden_cross_score || null
+            };
+            results.push(resultItem);
+            console.log(`[DEBUG] ${symbol} added to results:`, resultItem);
+            successCount++;
+            
+            // 成功時に進捗を更新
+            document.getElementById('progress-info').innerHTML = `
+              進捗: ${successCount + failCount}/${NASDAQ100_SYMBOLS.length} (${Math.round(((successCount + failCount) / NASDAQ100_SYMBOLS.length) * 100)}%)
+              <br>成功: <span class="text-green-600 font-bold">${successCount}</span> | 失敗: <span class="text-red-600 font-bold">${failCount}</span>
+              <br>完了: <strong class="text-green-600">${symbol}</strong> ✓
+            `;
+          } else {
+            failCount++;
+            console.warn(`[WARN] No valid data returned for ${symbol}:`, {hasSystemData: !!systemData, systemData});
+          }
+          
+        } catch (error) {
+          console.error(`Failed to analyze ${symbol}:`, error.message);
+          failCount++;
+          
+          // 失敗時に進捗を更新
+          document.getElementById('progress-info').innerHTML = `
+            進捗: ${successCount + failCount}/${NASDAQ100_SYMBOLS.length} (${Math.round(((successCount + failCount) / NASDAQ100_SYMBOLS.length) * 100)}%)
+            <br>成功: <span class="text-green-600 font-bold">${successCount}</span> | 失敗: <span class="text-red-600 font-bold">${failCount}</span>
+            <br>失敗: <strong class="text-red-600">${symbol}</strong> ✗ (${error.message})
+          `;
+        }
+        
+        // APIレート制限対策：失敗が多い場合は待機時間を増やす
+        // 75 calls/minute = 0.8秒/call が理論値、安全のため1.2秒に設定
+        const waitTime = failCount > 10 ? 2000 : 1200;  // 失敗が多い場合は2秒待機
+        
+        if (i < NASDAQ100_SYMBOLS.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+      }
+      
+      const endTime = Date.now();
+      const totalTime = Math.round((endTime - startTime) / 1000);
+      
+      // 結果表示
+      document.getElementById('loading').style.display = 'none';
+      
+      if (results.length === 0) {
+        document.getElementById('error-display').style.display = 'block';
+        document.getElementById('error-message').textContent = '分析結果が取得できませんでした。API Keyを確認してください。';
+        return;
+      }
+      
+      console.log(`[DEBUG] Total results collected: ${results.length}`);
+      console.log(`[DEBUG] First 3 results:`, results.slice(0, 3));
+      console.log(`[DEBUG] Success: ${successCount}, Fail: ${failCount}`);
+      console.log(`[DEBUG] Results array:`, results);
+      
+      // スコア順にソート（nullチェック）
+      const validResults = results.filter(r => r && r.symbol && r.score != null);
+      console.log(`[DEBUG] Valid results after filtering: ${validResults.length}`);
+      
+      validResults.sort((a, b) => (b.score || 0) - (a.score || 0));
+      
+      // TOP 30のみ表示
+      const top30 = validResults.slice(0, 30);
+      console.log(`[DEBUG] TOP 30 results:`, top30);
+      
+      displayResults(top30, systemName, totalTime, successCount, failCount);
+    }
+    
+    function displayResults(results, systemName, totalTime, successCount, failCount) {
+      console.log(`[DEBUG] displayResults called with:`, { resultsLength: results?.length, systemName, totalTime, successCount, failCount });
+      // resultsが空またはnullの場合のチェック
+      if (!results || results.length === 0) {
+        console.error('[ERROR] No results to display!');
+        document.getElementById('results').innerHTML = `
+          <div class="bg-red-50 border-2 border-red-300 rounded-lg p-6 text-center">
+            <i class="fas fa-times-circle text-red-600 text-6xl mb-4"></i>
+            <p class="text-lg text-gray-800 mb-2">表示可能な結果がありません</p>
+            <p class="text-sm text-gray-600">成功: ${successCount || 0}件 / 失敗: ${failCount || 0}件</p>
+          </div>
+        `;
+        return;
+      }
+      
+      document.getElementById('results').style.display = 'block';
+      
+      // 統計情報
+      const statsHTML = `
+        <div class="grid grid-cols-4 gap-4 p-4 bg-yellow-50 rounded-lg">
+          <div class="text-center">
+            <div class="text-2xl font-bold text-yellow-600">${results.length}</div>
+            <div class="text-sm text-gray-600">TOP 30</div>
+          </div>
+          <div class="text-center">
+            <div class="text-2xl font-bold text-green-600">${successCount}</div>
+            <div class="text-sm text-gray-600">分析成功</div>
+          </div>
+          <div class="text-center">
+            <div class="text-2xl font-bold text-red-600">${failCount}</div>
+            <div class="text-sm text-gray-600">分析失敗</div>
+          </div>
+          <div class="text-center">
+            <div class="text-2xl font-bold text-blue-600">${totalTime}秒</div>
+            <div class="text-sm text-gray-600">処理時間</div>
+          </div>
+        </div>
+        <div class="mt-2 text-sm text-gray-600">
+          <i class="fas fa-info-circle mr-1"></i>
+          ${systemName}による分析結果 | 成功率: ${(successCount + failCount) > 0 ? Math.round(successCount / (successCount + failCount) * 100) : 0}%
+        </div>
+      `;
+      document.getElementById('ranking-stats').innerHTML = statsHTML;
+      console.log(`[DEBUG] Stats HTML updated`);
+      
+      // ランキングテーブル
+      const isAdvanced = (systemName && (systemName.includes('システムB') || systemName.includes('Advanced'))) || false;
+      console.log(`[DEBUG] Building table, isAdvanced: ${isAdvanced}, systemName: ${systemName}`);
+      
+      let tableHTML = `
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-yellow-100">
+              <tr>
+                <th class="px-4 py-3 text-left">順位</th>
+                <th class="px-4 py-3 text-left">銘柄</th>
+                <th class="px-4 py-3 text-right">スコア</th>
+                <th class="px-4 py-3 text-center">シグナル</th>
+                <th class="px-4 py-3 text-right">信頼度</th>
+                ${isAdvanced ? '<th class="px-4 py-3 text-center">市場環境</th><th class="px-4 py-3 text-center">GC指標</th>' : '<th class="px-4 py-3 text-center">GC指標</th>'}
+              </tr>
+            </thead>
+            <tbody>
+      `;
+      
+      results.forEach((item, index) => {
+        // itemがnullまたはundefinedの場合はスキップ
+        if (!item || !item.symbol || item.score == null) {
+          console.warn(`[WARN] Skipping invalid item at index ${index}:`, item);
+          return;
+        }
+        
+        const signalBadge = getSignalBadge(item.signal || '中立');
+        const rankBadge = index < 3 ? `<span class="text-2xl">${['🥇', '🥈', '🥉'][index]}</span>` : `${index + 1}`;
+        
+        // ゴールデンクロススコアの表示
+        let gcDisplay = '<span class="text-gray-400">-</span>';
+        if (item.golden_cross_score !== null && item.golden_cross_score !== undefined) {
+          const gcScore = item.golden_cross_score;
+          let gcColor = 'bg-gray-100 text-gray-600';
+          if (gcScore >= 80) gcColor = 'bg-green-100 text-green-800';
+          else if (gcScore >= 60) gcColor = 'bg-blue-100 text-blue-800';
+          else if (gcScore <= 30) gcColor = 'bg-red-100 text-red-800';
+          
+          gcDisplay = `<span class="px-2 py-1 ${gcColor} rounded text-xs font-bold">${gcScore.toFixed(0)}</span>`;
+        }
+        
+        tableHTML += `
+          <tr class="border-b hover:bg-gray-50">
+            <td class="px-4 py-3 font-bold">${rankBadge}</td>
+            <td class="px-4 py-3">
+              <div class="font-bold text-blue-600">${item.symbol}</div>
+            </td>
+            <td class="px-4 py-3 text-right">
+              <div class="text-2xl font-bold" style="color: ${getScoreColor(item.score || 0)}">${(item.score || 0).toFixed(1)}</div>
+            </td>
+            <td class="px-4 py-3 text-center">${signalBadge}</td>
+            <td class="px-4 py-3 text-right">${(item.confidence != null) ? item.confidence.toFixed(0) : 0}%</td>
+            ${isAdvanced ? `<td class="px-4 py-3 text-center">${item.market_regime ? `<span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">${item.market_regime}</span>` : '<span class="text-gray-400">-</span>'}</td>` : ''}
+            <td class="px-4 py-3 text-center">${gcDisplay}</td>
+          </tr>
+        `;
+      });
+      
+      tableHTML += `
+            </tbody>
+          </table>
+        </div>
+      `;
+      
+      console.log(`[DEBUG] Table HTML length: ${tableHTML.length} chars`);
+      document.getElementById('ranking-table').innerHTML = tableHTML;
+      console.log(`[DEBUG] Table HTML injected into DOM`);
+    }
+    
+    function getSignalBadge(signal) {
+      const badges = {
+        'STRONG_BUY': '<span class="score-badge score-strong-buy">強い買い</span>',
+        'BUY': '<span class="score-badge score-buy">買い</span>',
+        'NEUTRAL': '<span class="score-badge score-neutral">中立</span>',
+        'SELL': '<span class="score-badge score-sell">売り</span>',
+        'STRONG_SELL': '<span class="score-badge score-strong-sell">強い売り</span>',
+        '強い買い': '<span class="score-badge score-strong-buy">強い買い</span>',
+        '買い': '<span class="score-badge score-buy">買い</span>',
+        '中立': '<span class="score-badge score-neutral">中立</span>',
+        '売り': '<span class="score-badge score-sell">売り</span>',
+        '強い売り': '<span class="score-badge score-strong-sell">強い売り</span>'
+      };
+      return badges[signal] || '<span class="score-badge score-neutral">-</span>';
+    }
+    
+    function getScoreColor(score) {
+      if (score >= 80) return '#10b981';
+      if (score >= 65) return '#3b82f6';
+      if (score >= 35) return '#6b7280';
+      if (score >= 20) return '#ef4444';
+      return '#7f1d1d';
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,966 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>テクニカル分析スクリーナー v3.0 INDENT FIXED 055945 - Alpha Vantage</title>
+  <script src="https://cdn.tailwindcss.com?v=20250204f"></script>
+  <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js?v=20250204c"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+  <style>
+    .loader {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #3B82F6;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      animation: spin 1s linear infinite;
+      margin: 20px auto;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .score-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      font-weight: bold;
+      font-size: 0.875rem;
+    }
+    .score-strong-buy { background-color: #10b981; color: white; }
+    .score-buy { background-color: #3b82f6; color: white; }
+    .score-neutral { background-color: #6b7280; color: white; }
+    .score-sell { background-color: #ef4444; color: white; }
+    .score-strong-sell { background-color: #7f1d1d; color: white; }
+    /* ナビゲーションバーのスタイル */
+    .nav-bar {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 1rem 2rem;
+      margin-bottom: 2rem;
+      border-radius: 0.5rem;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .nav-links {
+      display: flex;
+      gap: 2rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .nav-link {
+      color: white;
+      text-decoration: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 0.375rem;
+      font-weight: 600;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .nav-link:hover {
+      background-color: rgba(255, 255, 255, 0.2);
+      transform: translateY(-2px);
+    }
+    .nav-link.active {
+      background-color: rgba(147, 112, 219, 0.8);
+      border-bottom: 3px solid white;
+    }
+  </style>
+</head>
+<body class="bg-gray-100">
+  <!-- ナビゲーションバー -->
+  <nav class="nav-bar">
+    <div class="nav-links">
+      <a href="/static/technical-analysis-v4.html" class="nav-link active">
+        <i class="fas fa-chart-bar"></i>
+        📊 テクニカル分析スクリーナー
+      </a>
+      <a href="/static/nasdaq-ranking.html" class="nav-link">
+        <i class="fas fa-trophy"></i>
+        🏆 NASDAQ-100ランキング
+      </a>
+    </div>
+  </nav>
+
+  <div class="container mx-auto px-4 py-8 max-w-7xl">
+    <!-- ヘッダー -->
+    <div class="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-8 rounded-lg shadow-lg mb-8">
+      <h1 class="text-4xl font-bold mb-2">
+        <i class="fas fa-chart-bar mr-3"></i>
+        テクニカル分析スクリーナー
+      </h1>
+      <p class="text-xl opacity-90">Alpha Vantage 50+ 指標による高度なテクニカル分析</p>
+      <p class="mt-2 text-sm opacity-75">
+        システムA（シンプル5指標） • システムB（高度な複合評価20+指標） • システムC（ML予測125特徴量）
+      </p>
+    </div>
+
+    <!-- 銘柄入力エリア -->
+    <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+      <h2 class="text-2xl font-bold mb-4">
+        <i class="fas fa-search mr-2 text-indigo-600"></i>
+        銘柄分析
+      </h2>
+      
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div>
+          <label class="block text-sm font-semibold mb-2">銘柄コード</label>
+          <input 
+            type="text" 
+            id="symbol-input" 
+            placeholder="例: AAPL, TSLA, MSFT" 
+            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+          />
+        </div>
+        
+        <div>
+          <label class="block text-sm font-semibold mb-2">Alpha Vantage API Key</label>
+          <input 
+            type="text" 
+            id="api-key-input" 
+            placeholder="Your Alpha Vantage API Key" 
+            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+          />
+        </div>
+      </div>
+      
+      <!-- オプション -->
+      <div class="bg-purple-50 border-2 border-purple-300 rounded-lg p-4 mb-4">
+        <div class="flex items-start gap-3">
+          <input 
+            type="checkbox" 
+            id="enable-ml-checkbox" 
+            class="mt-1 w-5 h-5 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+            checked
+          />
+          <div class="flex-1">
+            <label for="enable-ml-checkbox" class="font-semibold text-gray-800 cursor-pointer">
+              <i class="fas fa-robot text-purple-600"></i>
+              システムC（ML予測）を有効化
+            </label>
+            <p class="text-sm text-gray-600 mt-1">
+              LightGBMモデルによる125特徴量分析を実行します（処理時間: 約15-30秒）
+            </p>
+          </div>
+        </div>
+      </div>
+      
+      <div class="bg-blue-50 border-2 border-blue-300 rounded-lg p-4 mb-4">
+        <div class="flex items-start gap-3">
+          <input 
+            type="checkbox" 
+            id="enable-backfit-checkbox" 
+            class="mt-1 w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+          />
+          <div class="flex-1">
+            <label for="enable-backfit-checkbox" class="font-semibold text-gray-800 cursor-pointer">
+              <i class="fas fa-chart-line text-blue-600"></i>
+              バックフィット検証を実施
+            </label>
+            <p class="text-sm text-gray-600 mt-1">
+              過去30日を除外した別モデルで学習し、予測精度を検証します（追加時間: 約5-10秒）
+            </p>
+          </div>
+        </div>
+      </div>
+      
+      <button 
+        onclick="analyzeTechnical()" 
+        class="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white px-8 py-4 rounded-lg font-semibold transition text-lg"
+      >
+        <i class="fas fa-chart-bar mr-2"></i>テクニカル分析を開始
+      </button>
+    </div>
+
+    <!-- ローディング表示 -->
+    <div id="loading" style="display:none;" class="bg-white rounded-lg shadow-md p-8 mb-6">
+      <div class="loader"></div>
+      <p id="loading-message" class="text-center text-gray-600 text-lg">分析中...</p>
+      <p class="text-center text-gray-500 text-sm mt-2">
+        Alpha Vantageから50+のテクニカル指標を取得中（約20-30秒）
+      </p>
+    </div>
+
+    <!-- 結果表示エリア -->
+    <div id="results" style="display:none;">
+      <!-- システムA結果 -->
+      <div id="system-a-results" class="bg-white rounded-lg shadow-lg p-6 mb-6">
+        <!-- 動的に挿入 -->
+      </div>
+      
+      <!-- システムB結果 -->
+      <div id="system-b-results" class="bg-white rounded-lg shadow-lg p-6 mb-6">
+        <!-- 動的に挿入 -->
+      </div>
+      
+      <!-- システムC結果 -->
+      <div id="system-c-results" class="bg-white rounded-lg shadow-lg p-6 mb-6">
+        <!-- 動的に挿入 -->
+      </div>
+    </div>
+
+    <!-- エラー表示 -->
+    <div id="error-display" style="display:none;" class="bg-red-50 border-2 border-red-300 rounded-lg p-6 mb-6">
+      <div class="flex items-start">
+        <i class="fas fa-exclamation-circle text-red-500 text-3xl mr-4"></i>
+        <div>
+          <h3 class="text-xl font-bold text-red-800 mb-2">エラーが発生しました</h3>
+          <p id="error-message" class="text-red-700"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // プロキシAPIを使用（CORS回避）
+    const USE_PROXY = true  // プロキシを有効化
+
+    async function analyzeTechnical() {
+      const symbol = document.getElementById('symbol-input').value.trim().toUpperCase()
+      const apiKey = document.getElementById('api-key-input').value.trim()
+      const enableML = document.getElementById('enable-ml-checkbox').checked
+      const enableBackfit = document.getElementById('enable-backfit-checkbox').checked
+      
+      if (!symbol) {
+        alert('銘柄コードを入力してください')
+        return
+      }
+      
+      if (!apiKey) {
+        alert('Alpha Vantage API Keyを入力してください')
+        return
+      }
+      
+      // UIリセット
+      document.getElementById('results').style.display = 'none'
+      document.getElementById('error-display').style.display = 'none'
+      document.getElementById('loading').style.display = 'block'
+      
+      // ローディングメッセージ更新
+      let loadingMsg = 'テクニカル指標を取得中...'
+      if (enableML && enableBackfit) {
+        loadingMsg += ' + ML学習 + バックフィット検証'
+      } else if (enableML) {
+        loadingMsg += ' + ML学習'
+      }
+      document.getElementById('loading-message').textContent = loadingMsg
+      
+      try {
+        // プロキシAPI経由でシステムA & B の分析
+        console.log('[CALL] /api/proxy/technical-analysis')
+        const technicalResponse = await axios.post('/api/proxy/technical-analysis', {
+          symbol: symbol,
+          alpha_vantage_api_key: apiKey,
+          mode: 'both',
+          timeframe: 'medium'  // "short" or "medium"
+        })
+        
+        console.log('[RESPONSE] Technical analysis:', technicalResponse.data)
+        
+        // 結果を表示（データ存在チェック）
+        if (technicalResponse.data.system_a) {
+          displaySystemA(technicalResponse.data.system_a)
+        } else {
+          console.error('[ERROR] system_a is missing in response')
+          document.getElementById('system-a-results').innerHTML = `
+            <div class="bg-red-50 border-2 border-red-300 rounded-lg p-6">
+              <p class="text-red-700">システムAのデータが取得できませんでした</p>
+            </div>
+          `
+        }
+        
+        if (technicalResponse.data.system_b) {
+          displaySystemB(technicalResponse.data.system_b)
+        } else {
+          console.error('[ERROR] system_b is missing in response')
+          document.getElementById('system-b-results').innerHTML = `
+            <div class="bg-red-50 border-2 border-red-300 rounded-lg p-6">
+              <p class="text-red-700">システムBのデータが取得できませんでした</p>
+            </div>
+          `
+        }
+        
+        // システムC（ML予測）
+        if (enableML) {
+          console.log('[CALL] /api/proxy/technical-ml-predict')
+          const mlResponse = await axios.post('/api/proxy/technical-ml-predict', {
+            symbol: symbol,
+            alpha_vantage_api_key: apiKey,
+            enable_backfit: enableBackfit,
+            force_retrain: false
+          })
+          
+          console.log('[RESPONSE] ML prediction:', mlResponse.data)
+          displaySystemC(mlResponse.data)
+        } else {
+          document.getElementById('system-c-results').innerHTML = `
+            <div class="text-center text-gray-500 py-8">
+              <i class="fas fa-robot text-6xl mb-4"></i>
+              <p class="text-lg">システムC（ML予測）は無効化されています</p>
+              <p class="text-sm mt-2">チェックボックスを有効にして再実行してください</p>
+            </div>
+          `
+        }
+        
+        document.getElementById('loading').style.display = 'none'
+        document.getElementById('results').style.display = 'block'
+        
+      } catch (error) {
+        console.error('[ERROR]', error)
+        document.getElementById('loading').style.display = 'none'
+        document.getElementById('error-display').style.display = 'block'
+        document.getElementById('error-message').textContent = error.response?.data?.detail || error.message
+      }
+    }
+    
+    function displaySystemA(data) {
+      if (!data) {
+        document.getElementById('system-a-results').innerHTML = '<p class="text-red-500">データがありません</p>';
+        return;
+      }
+      
+      const signalClass = {
+        'STRONG_BUY': 'score-strong-buy',
+        'BUY': 'score-buy',
+        'NEUTRAL': 'score-neutral',
+        'SELL': 'score-sell',
+        'STRONG_SELL': 'score-strong-sell',
+        '強い買い': 'score-strong-buy',
+        '買い': 'score-buy',
+        '中立': 'score-neutral',
+        '売り': 'score-sell',
+        '強い売り': 'score-strong-sell'
+      }[data.signal_type] || 'score-neutral';
+      
+      // カテゴリースコアのHTML生成（安全に）
+      let categoryScoresHtml = '';
+      try {
+        const categoryNames = {
+          'golden_cross': 'ゴールデンクロス',
+          'rsi': 'RSI',
+          'macd': 'MACD',
+          'bollinger': 'ボリンジャーバンド',
+          'volume': '出来高'
+        };
+        
+        if (data.category_scores && typeof data.category_scores === 'object') {
+          const entries = Object.entries(data.category_scores);
+          if (entries && entries.length > 0) {
+            categoryScoresHtml = entries.map(([key, score]) => {
+              const scorePercent = score || 0;
+              const signalColor = scorePercent >= 70 ? 'green' : scorePercent >= 50 ? 'blue' : scorePercent >= 30 ? 'yellow' : 'red';
+              const categoryName = categoryNames[key] || key;
+              
+              return `
+              <div class="border-l-4 border-${signalColor}-500 bg-${signalColor}-50 p-4 rounded">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="font-bold text-gray-800">${categoryName}</span>
+                  <span class="text-sm text-${signalColor}-600 font-bold">
+                    ${scorePercent}点
+                  </span>
+                </div>
+                <div class="w-full bg-gray-200 rounded-full h-2">
+                  <div class="bg-${signalColor}-500 h-2 rounded-full" style="width: ${scorePercent}%"></div>
+                </div>
+              </div>
+              `;
+            }).join('');
+          } else {
+            categoryScoresHtml = '<p class="text-gray-500">カテゴリースコアが空です</p>';
+          }
+        } else {
+          categoryScoresHtml = '<p class="text-gray-500">カテゴリースコアが利用できません</p>';
+        }
+      } catch (e) {
+        console.error('Error rendering category scores:', e);
+        categoryScoresHtml = '<p class="text-red-500">スコア表示エラー</p>';
+      }
+      
+      const html = `
+        <div class="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-lg mb-6">
+          <h2 class="text-3xl font-bold mb-4 text-indigo-800">
+            <i class="fas fa-star mr-2"></i>システムA: シンプル評価（5指標）
+          </h2>
+          <p class="text-gray-700 mb-4">初心者向けの基本的なテクニカル指標のみを使用したシンプルな評価システム</p>
+          
+          <div class="grid grid-cols-3 gap-6 mb-6">
+            <div class="bg-white p-6 rounded-lg shadow text-center">
+              <p class="text-sm text-gray-600 mb-2">総合スコア</p>
+              <p class="text-5xl font-bold text-indigo-600">${data.total_score || 0}</p>
+              <p class="text-gray-500 mt-2">/100点</p>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow text-center">
+              <p class="text-sm text-gray-600 mb-2">シグナル</p>
+              <p class="text-3xl font-bold">
+                <span class="score-badge ${signalClass}">${data.signal_type || '不明'}</span>
+              </p>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow text-center">
+              <p class="text-sm text-gray-600 mb-2">信頼度</p>
+              <p class="text-5xl font-bold text-green-600">${data.confidence || 0}</p>
+              <p class="text-gray-500 mt-2">%</p>
+            </div>
+          </div>
+          
+          <div class="bg-white p-6 rounded-lg shadow">
+            <h3 class="font-bold text-lg mb-4 text-gray-800">
+              <i class="fas fa-chart-bar mr-2"></i>カテゴリー別スコア
+            </h3>
+            <div class="space-y-3">
+              ${categoryScoresHtml}
+            </div>
+          </div>
+        </div>
+      `;
+      
+      document.getElementById('system-a-results').innerHTML = html;
+    }
+    
+    function displaySystemB(data) {
+      if (!data) {
+        document.getElementById('system-b-results').innerHTML = '<p class="text-red-500">データがありません</p>';
+        return;
+      }
+      
+      const signalClass = {
+        'STRONG_BUY': 'score-strong-buy',
+        'BUY': 'score-buy',
+        'NEUTRAL': 'score-neutral',
+        'SELL': 'score-sell',
+        'STRONG_SELL': 'score-strong-sell',
+        '強い買い': 'score-strong-buy',
+        '買い': 'score-buy',
+        '中立': 'score-neutral',
+        '売り': 'score-sell',
+        '強い売り': 'score-strong-sell'
+      }[data.signal_type] || 'score-neutral';
+      
+      const html = `
+        <div class="bg-gradient-to-r from-purple-50 to-pink-50 p-6 rounded-lg mb-6">
+          <h2 class="text-3xl font-bold mb-4 text-purple-800">
+            <i class="fas fa-brain mr-2"></i>システムB: 高度な複合評価（20+指標）
+          </h2>
+          <p class="text-gray-700 mb-4">マーケットレジーム検出 • 動的重み付け • 相関調整 • パターンボーナス • リスクスコア</p>
+          
+          <div class="grid grid-cols-4 gap-4 mb-6">
+            <div class="bg-white p-6 rounded-lg shadow text-center">
+              <p class="text-sm text-gray-600 mb-2">総合スコア</p>
+              <p class="text-4xl font-bold text-purple-600">${data.total_score}</p>
+              <p class="text-gray-500 mt-1">/100点</p>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow text-center">
+              <p class="text-sm text-gray-600 mb-2">シグナル</p>
+              <p class="text-2xl font-bold">
+                <span class="score-badge ${signalClass}">${data.signal_type}</span>
+              </p>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow text-center">
+              <p class="text-sm text-gray-600 mb-2">信頼度</p>
+              <p class="text-4xl font-bold text-green-600">${data.confidence}</p>
+              <p class="text-gray-500 mt-1">%</p>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow text-center">
+              <p class="text-sm text-gray-600 mb-2">マーケットレジーム</p>
+              <p class="text-lg font-bold text-indigo-600">${data.market_regime}</p>
+            </div>
+          </div>
+          
+          <div class="grid grid-cols-2 gap-6 mb-6">
+            <!-- カテゴリスコア -->
+            <div class="bg-white p-6 rounded-lg shadow">
+              <h3 class="font-bold text-lg mb-4 text-gray-800">
+                <i class="fas fa-layer-group mr-2"></i>カテゴリ別スコア
+              </h3>
+              <div class="space-y-3" id="system-b-category-scores">
+              </div>
+            </div>
+            
+            <!-- リスクスコア -->
+            <div class="bg-white p-6 rounded-lg shadow">
+              <h3 class="font-bold text-lg mb-4 text-gray-800">
+                <i class="fas fa-shield-alt mr-2"></i>リスク評価
+              </h3>
+              <div class="text-center mb-4">
+                <p class="text-5xl font-bold ${data.risk_score < 30 ? 'text-green-600' : data.risk_score < 70 ? 'text-yellow-600' : 'text-red-600'}">
+                  ${data.risk_score}
+                </p>
+                <p class="text-gray-500 mt-2">リスクスコア（低いほど安全）</p>
+              </div>
+              <div class="bg-gray-50 p-3 rounded">
+                <p class="text-xs text-gray-600 text-center">
+                  ${data.risk_score < 30 ? '✓ 低リスク' : data.risk_score < 70 ? '△ 中リスク' : '✗ 高リスク'}
+                </p>
+              </div>
+            </div>
+          </div>
+          
+          <!-- スコアサマリー -->
+          <div class="bg-white p-6 rounded-lg shadow">
+            <h3 class="font-bold text-lg mb-4 text-gray-800">
+              <i class="fas fa-info-circle mr-2"></i>評価サマリー
+            </h3>
+            <div class="space-y-4">
+              <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
+                <p class="font-bold text-gray-800 mb-2">マーケット環境</p>
+                <p class="text-sm text-gray-700">${data.market_regime}</p>
+              </div>
+              
+              <div class="bg-indigo-50 border-l-4 border-indigo-500 p-4 rounded">
+                <p class="font-bold text-gray-800 mb-2">ステップ2: 市場環境検出</p>
+                <p class="text-sm text-gray-700">検出結果: <span class="font-bold text-indigo-600">${data.calculation_logic.step2_market_regime}</span></p>
+              </div>
+              
+              <div class="bg-indigo-50 border-l-4 border-indigo-500 p-4 rounded">
+                <p class="font-bold text-gray-800 mb-2">総合スコア</p>
+                <p class="text-3xl font-bold text-indigo-600">${data.total_score}/100</p>
+              </div>
+              
+              <div class="bg-green-50 border-l-4 border-green-500 p-4 rounded">
+                <p class="font-bold text-gray-800 mb-2">シグナル</p>
+                <p class="text-2xl font-bold text-green-600">${data.signal_type}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      `
+      
+      document.getElementById('system-b-results').innerHTML = html;
+      
+      // カテゴリースコアを安全に追加
+      try {
+        const categoryScoresContainer = document.getElementById('system-b-category-scores');
+        if (categoryScoresContainer && data.category_scores && typeof data.category_scores === 'object') {
+          const categoryNames = {
+            'trend': 'トレンド',
+            'momentum': 'モメンタム',
+            'volatility': 'ボラティリティ',
+            'volume': '出来高'
+          };
+          
+          const entries = Object.entries(data.category_scores);
+          if (entries && entries.length > 0) {
+            const categoryHtml = entries.map(([category, score]) => {
+              const scoreValue = typeof score === 'number' ? score : 0;
+              const categoryName = categoryNames[category] || category;
+              return `
+              <div>
+                <div class="flex justify-between items-center mb-1">
+                  <span class="text-sm font-semibold text-gray-700">${categoryName}</span>
+                  <span class="text-sm font-bold text-purple-600">${scoreValue.toFixed(1)}</span>
+                </div>
+                <div class="w-full bg-gray-200 rounded-full h-2">
+                  <div class="bg-purple-600 h-2 rounded-full" style="width: ${scoreValue}%"></div>
+                </div>
+              </div>
+              `;
+            }).join('');
+            
+            categoryScoresContainer.innerHTML = categoryHtml;
+          } else {
+            categoryScoresContainer.innerHTML = '<p class="text-gray-500 text-sm">カテゴリースコアが空です</p>';
+          }
+        }
+      } catch (e) {
+        console.error('Error rendering System B category scores:', e);
+      }
+    }
+    
+    function displaySystemC(data) {
+      console.log('[displaySystemC] Received data:', data)
+      
+      if (!data || !data.training || !data.training.metrics) {
+        document.getElementById('system-c-results').innerHTML = `
+          <div class="bg-gray-100 border-2 border-gray-300 rounded-lg p-6 text-center">
+            <i class="fas fa-robot text-gray-400 text-6xl mb-4"></i>
+            <p class="text-lg text-gray-600 mb-2">ML予測データがありません</p>
+            <p class="text-sm text-gray-500">学習を実行してください</p>
+          </div>
+        `
+        return
+      }
+      
+      const training = data.training.metrics
+      const future = data.future_predictions
+      const backfit = data.training.backfit_predictions
+      const featureImportances = data.training.feature_importances
+      // 現在価格を正しく取得（future_predictions.current_priceまたはdata.current_price）
+      const current_price = data.current_price || future?.current_price || 0
+      
+      const html = `
+        <div class="bg-gradient-to-r from-green-50 to-teal-50 p-6 rounded-lg mb-6">
+          <h2 class="text-3xl font-bold mb-4 text-green-800">
+            <i class="fas fa-robot mr-2"></i>システムC: ML予測（107特徴量 + LightGBM）
+          </h2>
+          <p class="text-gray-700 mb-6">機械学習による未来7日予測（Direct LGBM + Decay） + 過去30日バックフィット検証</p>
+          
+          <!-- ML学習プロセス説明 -->
+          ${data.ml_training_process ? `
+          <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded mb-6">
+            <h3 class="font-bold text-lg text-blue-800 mb-3">
+              <i class="fas fa-info-circle mr-2"></i>ML学習プロセスの説明
+            </h3>
+            <p class="text-sm text-gray-700 mb-3">${data.ml_training_process.overview}</p>
+            <details class="text-sm">
+              <summary class="cursor-pointer font-semibold text-blue-700 hover:text-blue-900 mb-2">
+                詳細な学習ステップを表示 <i class="fas fa-chevron-down ml-1"></i>
+              </summary>
+              <div class="mt-3 space-y-3">
+                ${data.ml_training_process.steps.map(step => `
+                  <div class="bg-white p-3 rounded border border-blue-200">
+                    <p class="font-bold text-blue-800">ステップ${step.step}: ${step.name}</p>
+                    <p class="text-gray-700 text-xs mt-1">${step.description}</p>
+                  </div>
+                `).join('')}
+              </div>
+              <div class="mt-4 bg-white p-3 rounded border border-blue-200">
+                <p class="font-bold text-blue-800 mb-2">評価指標の意味</p>
+                <ul class="text-xs text-gray-700 space-y-1">
+                  <li><strong>MAE:</strong> ${data.ml_training_process.metrics_explanation.mae}</li>
+                  <li><strong>RMSE:</strong> ${data.ml_training_process.metrics_explanation.rmse}</li>
+                  <li><strong>R²:</strong> ${data.ml_training_process.metrics_explanation.r2}</li>
+                  <li><strong>MAPE:</strong> ${data.ml_training_process.metrics_explanation.mape}</li>
+                </ul>
+              </div>
+              <div class="mt-3 bg-white p-3 rounded border border-blue-200">
+                <p class="font-bold text-blue-800 mb-1">バックフィット検証について</p>
+                <p class="text-xs text-gray-700">${data.ml_training_process.backfit_explanation.description}</p>
+              </div>
+            </details>
+          </div>
+          ` : ''}
+          
+          <!-- 学習サマリー -->
+          <div class="grid grid-cols-4 gap-4 mb-6">
+            <div class="bg-white p-6 rounded-lg shadow text-center">
+              <p class="text-sm text-gray-600 mb-2">学習時間</p>
+              <p class="text-3xl font-bold text-green-600">${training.training_duration.toFixed(1)}秒</p>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow text-center">
+              <p class="text-sm text-gray-600 mb-2">R² スコア</p>
+              <p class="text-3xl font-bold text-blue-600">${training.val_r2.toFixed(3)}</p>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow text-center">
+              <p class="text-sm text-gray-600 mb-2">RMSE</p>
+              <p class="text-3xl font-bold text-purple-600">${training.val_rmse.toFixed(2)}</p>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow text-center">
+              <p class="text-sm text-gray-600 mb-2">学習サンプル数</p>
+              <p class="text-3xl font-bold text-indigo-600">${training.training_samples}</p>
+            </div>
+          </div>
+          
+          <!-- 未来予測 -->
+          ${future && future.predictions && future.predictions.length > 0 ? `
+          <div class="bg-white p-6 rounded-lg shadow mb-6">
+            <h3 class="font-bold text-xl mb-4 text-gray-800">
+              <i class="fas fa-chart-line mr-2"></i>未来7日予測
+            </h3>
+            <canvas id="futurePredictionChart" style="max-height: 400px;"></canvas>
+            <div class="grid grid-cols-3 gap-4 mt-4">
+              <div class="bg-blue-50 p-4 rounded text-center">
+                <p class="text-sm text-gray-600 mb-1">14日後予測価格</p>
+                <p class="text-2xl font-bold text-blue-600">$${future.predictions[future.predictions.length - 1].toFixed(2)}</p>
+              </div>
+              <div class="bg-green-50 p-4 rounded text-center">
+                <p class="text-sm text-gray-600 mb-1">変化率</p>
+                <p class="text-2xl font-bold text-green-600">
+                  ${((future.predictions[future.predictions.length - 1] - future.predictions[0]) / future.predictions[0] * 100).toFixed(2)}%
+                </p>
+              </div>
+              <div class="bg-purple-50 p-4 rounded text-center">
+                <p class="text-sm text-gray-600 mb-1">予測最高値</p>
+                <p class="text-2xl font-bold text-purple-600">$${Math.max(...future.predictions).toFixed(2)}</p>
+              </div>
+            </div>
+          </div>
+          ` : ''}
+          
+          <!-- バックフィット検証 -->
+          ${backfit ? `
+          <div class="bg-white p-6 rounded-lg shadow mb-6">
+            <h3 class="font-bold text-xl mb-4 text-gray-800">
+              <i class="fas fa-chart-area mr-2"></i>バックフィット検証（過去30日）
+            </h3>
+            <canvas id="backfitChart" style="max-height: 400px;"></canvas>
+            <div class="grid grid-cols-3 gap-4 mt-4">
+              <div class="bg-blue-50 p-4 rounded text-center">
+                <p class="text-sm text-gray-600 mb-1">RMSE（誤差）</p>
+                <p class="text-2xl font-bold text-blue-600">${backfit.rmse.toFixed(2)}</p>
+              </div>
+              <div class="bg-green-50 p-4 rounded text-center">
+                <p class="text-sm text-gray-600 mb-1">MAE（平均誤差）</p>
+                <p class="text-2xl font-bold text-green-600">${backfit.mae.toFixed(2)}</p>
+              </div>
+              <div class="bg-purple-50 p-4 rounded text-center">
+                <p class="text-sm text-gray-600 mb-1">方向性正解率</p>
+                <p class="text-2xl font-bold text-purple-600">${backfit.direction_accuracy.toFixed(1)}%</p>
+              </div>
+            </div>
+          </div>
+          ` : ''}
+          
+          <!-- 特徴量重要度 -->
+          <div class="bg-white p-6 rounded-lg shadow">
+            <h3 class="font-bold text-xl mb-4 text-gray-800">
+              <i class="fas fa-list-ol mr-2"></i>特徴量重要度ランキング（Top 10）
+            </h3>
+            <canvas id="featureImportanceChart" style="max-height: 350px;"></canvas>
+          </div>
+        </div>
+      `
+      
+      document.getElementById('system-c-results').innerHTML = html
+      
+      // チャート描画
+      if (future && future.predictions) {
+        renderFuturePredictionChart(future, current_price)
+      }
+      if (backfit) {
+        renderBackfitChart(backfit)
+      }
+      if (featureImportances) {
+        renderFeatureImportanceChart(featureImportances)
+      }
+    }
+    
+    function renderFuturePredictionChart(future, current_price) {
+      const ctx = document.getElementById('futurePredictionChart').getContext('2d')
+      
+      // 既存のチャートを破棄（重要：古いチャートが残るのを防ぐ）
+      const existingChart = Chart.getChart('futurePredictionChart')
+      if (existingChart) {
+        existingChart.destroy()
+      }
+      
+      // 現在価格を追加（起点として）
+      const allDates = ['今日', ...future.dates]
+      const allPredictions = [current_price, ...future.predictions]
+      const allUpper = [current_price, ...future.upper_bound]
+      const allLower = [current_price, ...future.lower_bound]
+      
+      console.log('[renderFuturePredictionChart] current_price:', current_price, 'predictions:', future.predictions.slice(0, 3))
+      
+      new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: allDates,
+          datasets: [
+            {
+              label: '予測価格',
+              data: allPredictions,
+              borderColor: 'rgb(34, 197, 94)',
+              backgroundColor: 'transparent',
+              borderWidth: 3,
+              tension: 0.3,
+              fill: false,
+              pointRadius: 0
+            },
+            {
+              label: '信頼区間（上限）',
+              data: allUpper,
+              borderColor: 'rgba(156, 163, 175, 0.3)',
+              backgroundColor: 'rgba(156, 163, 175, 0.1)',
+              borderWidth: 1,
+              borderDash: [5, 5],
+              tension: 0.3,
+              fill: '+1',
+              pointRadius: 0
+            },
+            {
+              label: '信頼区間（下限）',
+              data: allLower,
+              borderColor: 'rgba(156, 163, 175, 0.3)',
+              backgroundColor: 'rgba(156, 163, 175, 0.1)',
+              borderWidth: 1,
+              borderDash: [5, 5],
+              tension: 0.3,
+              fill: false,
+              pointRadius: 0
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: true },
+            title: { display: false },
+            tooltip: {
+              mode: 'index',
+              intersect: false
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: false,
+              title: { display: true, text: '価格 (USD)' }
+            },
+            x: {
+              title: { display: true, text: '日付' },
+              ticks: {
+                maxRotation: 45,
+                minRotation: 45
+              }
+            }
+          }
+        }
+      })
+    }
+    
+    function renderBackfitChart(backfit) {
+      const ctx = document.getElementById('backfitChart').getContext('2d')
+      
+      // 既存のチャートを破棄
+      const existingChart = Chart.getChart('backfitChart')
+      if (existingChart) {
+        existingChart.destroy()
+      }
+      
+      new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: backfit.dates,
+          datasets: [
+            {
+              label: '実際の価格',
+              data: backfit.actual_prices,
+              borderColor: 'rgb(59, 130, 246)',
+              backgroundColor: 'transparent',
+              borderWidth: 2,
+              tension: 0.1
+            },
+            {
+              label: 'ML予測価格',
+              data: backfit.predictions,
+              borderColor: 'rgb(249, 115, 22)',
+              backgroundColor: 'transparent',
+              borderWidth: 2,
+              borderDash: [5, 5],
+              tension: 0.1
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: true },
+            title: { display: false }
+          },
+          scales: {
+            y: {
+              beginAtZero: false,
+              title: { display: true, text: '価格 (USD)' }
+            },
+            x: {
+              title: { display: true, text: '日付' }
+            }
+          }
+        }
+      })
+    }
+    
+    function renderFeatureImportanceChart(importances) {
+      const ctx = document.getElementById('featureImportanceChart').getContext('2d')
+      
+      // 既存のチャートを破棄
+      const existingChart = Chart.getChart('featureImportanceChart')
+      if (existingChart) {
+        existingChart.destroy()
+      }
+      
+      // importancesが配列の場合（[{feature: 'xxx', importance: 0.123}, ...]）
+      let features, values
+      
+      if (Array.isArray(importances)) {
+        // Top 10のみ取得
+        const top10 = importances.slice(0, 10)
+        features = top10.map(item => item.feature || item.name || 'Unknown')
+        values = top10.map(item => item.importance || item.gain || 0)
+      } else if (typeof importances === 'object') {
+        // オブジェクトの場合（{feature1: 0.123, feature2: 0.456, ...}）
+        const entries = Object.entries(importances).slice(0, 10)
+        features = entries.map(([key]) => key)
+        values = entries.map(([, value]) => value)
+      } else {
+        console.error('Invalid importances format:', importances)
+        return
+      }
+      
+      // 色のグラデーション（重要度が高いほど濃い色）
+      const maxValue = Math.max(...values)
+      const colors = values.map(val => {
+        const intensity = val / maxValue
+        const r = Math.floor(99 + (34 - 99) * intensity)
+        const g = Math.floor(102 + (197 - 102) * intensity)
+        const b = Math.floor(241 + (94 - 241) * intensity)
+        return `rgba(${r}, ${g}, ${b}, 0.8)`
+      })
+      
+      new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: features,
+          datasets: [{
+            label: '重要度スコア',
+            data: values,
+            backgroundColor: colors,
+            borderColor: colors.map(color => color.replace('0.8', '1')),
+            borderWidth: 2
+          }]
+        },
+        options: {
+          indexAxis: 'y',  // 横棒グラフ
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            title: { 
+              display: true,
+              text: '株価予測に最も影響を与える10個の特徴量',
+              font: { size: 14, weight: 'bold' },
+              color: '#374151'
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const value = context.parsed.x
+                  const total = values.reduce((a, b) => a + b, 0)
+                  const percentage = ((value / total) * 100).toFixed(1)
+                  return `重要度: ${value.toFixed(4)} (${percentage}%)`
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              beginAtZero: true,
+              title: { 
+                display: true, 
+                text: '重要度スコア（値が高いほど予測への影響が大きい）',
+                font: { size: 12 },
+                color: '#6b7280'
+              },
+              grid: {
+                color: 'rgba(0, 0, 0, 0.05)'
+              }
+            },
+            y: {
+              grid: {
+                display: false
+              },
+              ticks: {
+                font: { size: 11 },
+                color: '#374151'
+              }
+            }
+          }
+        }
+      })
+    }
+  </script>
+</body>
+</html>
