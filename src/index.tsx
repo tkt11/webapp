@@ -131,10 +131,8 @@ app.post('/api/sentiment-analysis', async (c) => {
       return c.json({ error: 'Symbol is required' }, 400)
     }
     
-    // キャッシュサービス初期化
-    const cache = c.env.CACHE 
-      ? new KVCacheService(c.env.CACHE)
-      : new MemoryCacheService()
+    // キャッシュサービス初期化（KV無効化、メモリキャッシュのみ使用）
+    const cache = new MemoryCacheService()
     
     // キャッシュキー生成（1時間TTL）
     const cacheKey = getCacheKey('sentiment', { symbol, useGpt5 })
