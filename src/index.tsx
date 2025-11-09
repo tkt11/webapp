@@ -1,7 +1,12 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { serveStatic } from 'hono/cloudflare-workers'
+import type { Env } from './types'
+import { KVCacheService, MemoryCacheService, getCacheKey } from './services/cache'
+import { fetchAlphaVantageNews } from './services/api-client'
+import { performSentimentAnalysis } from './services/sentiment'
 
-const app = new Hono()
+const app = new Hono<{ Bindings: Env }>()
 
 // CORS設定
 app.use('/api/*', cors())
@@ -117,25 +122,80 @@ app.post('/api/proxy/nasdaq-ranking', async (c) => {
   }
 })
 
-// メインページ（軽量版）
+// センチメント分析API（キャッシュ付き、Alpha Vantage + GPT-5）
+app.post('/api/sentiment-analysis', async (c) => {
+  try {
+    const { symbol, useGpt5 = false } = await c.req.json()
+    
+    if (!symbol) {
+      return c.json({ error: 'Symbol is required' }, 400)
+    }
+    
+    // キャッシュサービス初期化
+    const cache = c.env.CACHE 
+      ? new KVCacheService(c.env.CACHE)
+      : new MemoryCacheService()
+    
+    // キャッシュキー生成（1時間TTL）
+    const cacheKey = getCacheKey('sentiment', { symbol, useGpt5 })
+    
+    // キャッシュチェック
+    const cached = await cache.get(cacheKey)
+    if (cached) {
+      console.log(`[Sentiment] Cache hit for ${symbol}`)
+      return c.json({
+        ...cached,
+        cached: true,
+        timestamp: new Date().toISOString()
+      })
+    }
+    
+    console.log(`[Sentiment] Cache miss for ${symbol}, fetching news...`)
+    
+    // Alpha Vantage APIキー取得
+    const alphaVantageKey = c.env.ALPHA_VANTAGE_API_KEY
+    if (!alphaVantageKey) {
+      return c.json({ error: 'ALPHA_VANTAGE_API_KEY not configured' }, 500)
+    }
+    
+    // 40件のニュース取得
+    const news = await fetchAlphaVantageNews(symbol, alphaVantageKey, 40)
+    
+    if (!news || news.length === 0) {
+      return c.json({
+        error: 'No news found',
+        symbol,
+        news_count: 0
+      }, 404)
+    }
+    
+    // センチメント分析実行
+    // useGpt5がtrueの場合、GPT-5で4件（ネガティブ上位2件 + ポジティブ上位2件）分析
+    const openaiKey = useGpt5 ? c.env.OPENAI_API_KEY : undefined
+    const result = await performSentimentAnalysis(news, symbol, openaiKey)
+    
+    // キャッシュに保存（1時間 = 3600秒）
+    await cache.set(cacheKey, result, 3600)
+    
+    return c.json({
+      ...result,
+      cached: false,
+      timestamp: new Date().toISOString()
+    })
+    
+  } catch (error: any) {
+    console.error('[Sentiment] Analysis error:', error)
+    return c.json({ error: error.message }, 500)
+  }
+})
+
+// 静的ファイル配信
+app.use('/*', serveStatic({ root: './' }))
+
+// メインページ（フォールバック）
 app.get('/', (c) => {
-  return c.html(`
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Stock AI Predictor</title>
-  <script>
-    // Redirect to static HTML pages
-    window.location.href = '/static/nasdaq-ranking.html';
-  </script>
-</head>
-<body>
-  <p>Redirecting to NASDAQ-100 Ranking...</p>
-</body>
-</html>
-  `)
+  // index.htmlにリダイレクト
+  return c.redirect('/index.html')
 })
 
 export default app

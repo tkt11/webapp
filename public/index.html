@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate, max-age=0">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="-1">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Stock AI Predictor - 株価予測AI v12.0 SENTIMENT ENHANCED</title>
+  <script>
+    // Version 12.0 - Sentiment Analysis Enhancement
+    console.log('%c Application Version: 12.0 - SENTIMENT ANALYSIS ENHANCED', 'color: #10b981; font-weight: bold; font-size: 16px;');
+    console.log('%c New features in v12.0:', 'color: #3b82f6; font-weight: bold;');
+    console.log('  - 影響度スコアリング表示（センチメント60% + 新しさ20% + 信頼性20%）');
+    console.log('  - ニュースURL・日付を表示');
+    console.log('  - クリティカルネガティブアラート表示');
+    console.log('  - GPT-5使用のトグルボタン');
+    console.log('  - 40件取得、20件表示（影響度順）');
+    console.log('%c Press Ctrl+Shift+R to force refresh!', 'color: #f59e0b; font-weight: bold; font-size: 14px;');
+  </script>
+  <script src="https://cdn.tailwindcss.com?v=12.0"></script>
+  <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js?v=12.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js?v=12.0"></script>
+  <style>
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .tab-button.active { 
+      background-color: #3B82F6; 
+      color: white; 
+    }
+    .score-bar {
+      height: 24px;
+      border-radius: 4px;
+      transition: width 0.5s ease;
+    }
+    .loader {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #3B82F6;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 20px auto;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      overflow: auto;
+      background-color: rgba(0,0,0,0.6);
+      animation: fadeIn 0.3s;
+    }
+    .modal.active {
+      display: block;
+    }
+    .modal-content {
+      background-color: #fefefe;
+      margin: 5% auto;
+      padding: 0;
+      border-radius: 12px;
+      width: 90%;
+      max-width: 900px;
+      max-height: 85vh;
+      overflow-y: auto;
+      animation: slideDown 0.3s;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes slideDown {
+      from { transform: translateY(-50px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    .score-card {
+      cursor: pointer;
+      transition: all 0.3s ease;
+      border: 2px solid transparent;
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .score-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+      border-color: #3B82F6;
+      background-color: #F8FAFC;
+    }
+    .critical-alert {
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.8; }
+    }
+  </style>
+</head>
+<body class="bg-gray-100">
+  <div class="container mx-auto px-4 py-8 max-w-7xl">
+    <!-- ヘッダー -->
+    <div class="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-8 rounded-lg shadow-lg mb-8">
+      <h1 class="text-4xl font-bold mb-2">
+        <i class="fas fa-chart-line mr-3"></i>
+        Stock AI Predictor
+      </h1>
+      <p class="text-xl opacity-90">5次元分析 × GPT-5で株価を予測</p>
+      <p class="mt-2 text-sm opacity-75">
+        テクニカル • ファンダメンタル • センチメント（強化版） • マクロ経済 • アナリスト評価
+      </p>
+    </div>
+
+    <!-- メインコンテンツ -->
+    <div class="bg-white rounded-lg shadow-md p-6">
+      <h2 class="text-2xl font-bold mb-4">
+        <i class="fas fa-newspaper mr-2 text-yellow-600"></i>
+        センチメント分析（強化版）
+      </h2>
+      
+      <div class="flex gap-4 mb-4">
+        <input 
+          type="text" 
+          id="symbol-input" 
+          placeholder="銘柄コード (例: AAPL, GOOGL, MSFT)" 
+          class="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+        />
+        <button 
+          onclick="analyzeSentiment()" 
+          class="bg-yellow-600 hover:bg-yellow-700 text-white px-8 py-3 rounded-lg font-semibold transition"
+        >
+          <i class="fas fa-search mr-2"></i>分析開始
+        </button>
+      </div>
+
+      <!-- GPT-5使用のトグルボタン -->
+      <div class="mb-6 bg-gradient-to-r from-purple-50 to-indigo-50 border-2 border-purple-300 rounded-lg p-4">
+        <div class="flex items-start gap-3">
+          <input 
+            type="checkbox" 
+            id="use-gpt5-checkbox" 
+            class="mt-1 w-5 h-5 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+          />
+          <div class="flex-1">
+            <label for="use-gpt5-checkbox" class="font-semibold text-gray-800 cursor-pointer">
+              <i class="fas fa-robot text-purple-600"></i>
+              GPT-5による高度な分析を有効化（重要ニュース4件を深掘り分析）
+            </label>
+            <p class="text-sm text-gray-600 mt-1">
+              ネガティブ上位2件 + ポジティブ上位2件をGPT-5が詳細分析します。
+            </p>
+            <p class="text-xs text-gray-500 mt-2">
+              <i class="fas fa-dollar-sign mr-1"></i>
+              コスト: 約$0.26/回（約39円） | キャッシュ: 1時間
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ローディング -->
+      <div id="sentiment-loading" style="display:none;" class="text-center py-8">
+        <div class="loader mx-auto"></div>
+        <p class="text-gray-600 mt-4">ニュースを分析中...</p>
+        <p class="text-sm text-gray-500 mt-2">40件のニュース取得 + 影響度スコアリング</p>
+      </div>
+
+      <!-- 結果表示 -->
+      <div id="sentiment-result" style="display:none;">
+        <!-- 動的に挿入 -->
+      </div>
+
+      <!-- エラー表示 -->
+      <div id="sentiment-error" style="display:none;" class="bg-red-50 border-2 border-red-300 rounded-lg p-6">
+        <div class="flex items-start">
+          <i class="fas fa-exclamation-circle text-red-500 text-3xl mr-4"></i>
+          <div>
+            <h3 class="text-xl font-bold text-red-800 mb-2">エラーが発生しました</h3>
+            <p id="error-message" class="text-red-700"></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    async function analyzeSentiment() {
+      const symbol = document.getElementById('symbol-input').value.trim().toUpperCase()
+      const useGpt5 = document.getElementById('use-gpt5-checkbox').checked
+      
+      if (!symbol) {
+        alert('銘柄コードを入力してください')
+        return
+      }
+      
+      // UIリセット
+      document.getElementById('sentiment-result').style.display = 'none'
+      document.getElementById('sentiment-error').style.display = 'none'
+      document.getElementById('sentiment-loading').style.display = 'block'
+      
+      try {
+        const response = await axios.post('/api/sentiment-analysis', {
+          symbol,
+          useGpt5
+        })
+        
+        const data = response.data
+        displaySentimentResult(data, symbol)
+        
+      } catch (error) {
+        console.error('[Sentiment] Analysis error:', error)
+        document.getElementById('sentiment-loading').style.display = 'none'
+        document.getElementById('sentiment-error').style.display = 'block'
+        document.getElementById('error-message').textContent = error.response?.data?.error || error.message
+      }
+    }
+    
+    function displaySentimentResult(data, symbol) {
+      document.getElementById('sentiment-loading').style.display = 'none'
+      document.getElementById('sentiment-result').style.display = 'block'
+      
+      const criticalAlertsHtml = data.critical_alerts && data.critical_alerts.length > 0 ? `
+        <div class="bg-red-50 border-4 border-red-500 rounded-lg p-6 mb-6 critical-alert">
+          <h3 class="text-2xl font-bold text-red-800 mb-4">
+            <i class="fas fa-exclamation-triangle mr-2"></i>
+            クリティカルネガティブアラート（${data.critical_alerts.length}件）
+          </h3>
+          <p class="text-sm text-red-700 mb-4">
+            <i class="fas fa-info-circle mr-1"></i>
+            センチメント≤-0.5 AND 影響度≥70点の重大なネガティブニュース
+          </p>
+          <div class="space-y-3">
+            ${data.critical_alerts.map(alert => `
+              <div class="bg-white border-2 border-red-400 rounded-lg p-4">
+                <div class="flex justify-between items-start mb-2">
+                  <div class="flex-1">
+                    <h4 class="font-bold text-lg text-red-900 mb-1">${alert.headline}</h4>
+                    <div class="flex gap-4 text-sm text-gray-600 mb-2">
+                      <span><i class="fas fa-newspaper mr-1"></i>${alert.source}</span>
+                      <span><i class="far fa-calendar mr-1"></i>${alert.date_formatted}</span>
+                      <a href="${alert.url}" target="_blank" class="text-blue-600 hover:underline">
+                        <i class="fas fa-external-link-alt mr-1"></i>記事を読む
+                      </a>
+                    </div>
+                  </div>
+                </div>
+                <div class="grid grid-cols-3 gap-3">
+                  <div class="bg-red-100 p-2 rounded text-center">
+                    <p class="text-xs text-gray-600">センチメント</p>
+                    <p class="text-2xl font-bold text-red-700">${alert.sentiment_score.toFixed(2)}</p>
+                  </div>
+                  <div class="bg-orange-100 p-2 rounded text-center">
+                    <p class="text-xs text-gray-600">影響度スコア</p>
+                    <p class="text-2xl font-bold text-orange-700">${alert.impact_score}点</p>
+                  </div>
+                  <div class="bg-yellow-100 p-2 rounded text-center">
+                    <p class="text-xs text-gray-600">関連性</p>
+                    <p class="text-2xl font-bold text-yellow-700">${(alert.relevance_score * 100).toFixed(0)}%</p>
+                  </div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''
+      
+      const newsExamplesHtml = data.news_examples && data.news_examples.length > 0 ? `
+        <div class="bg-white border border-gray-200 rounded-lg p-4 mb-6">
+          <h3 class="font-bold text-lg mb-3">
+            <i class="fas fa-list mr-2"></i>
+            ニュース一覧（影響度順 上位20件）
+          </h3>
+          <div class="space-y-3">
+            ${data.news_examples.map((example, index) => `
+              <div class="border-l-4 ${example.sentiment === 'positive' ? 'border-green-500 bg-green-50' : example.sentiment === 'negative' ? 'border-red-500 bg-red-50' : 'border-gray-500 bg-gray-50'} p-3 rounded">
+                <div class="flex items-center justify-between mb-2">
+                  <div class="flex items-center gap-2">
+                    <span class="bg-blue-500 text-white text-xs font-bold px-2 py-1 rounded">#${index + 1}</span>
+                    <span class="text-xs font-bold px-2 py-1 rounded ${example.sentiment === 'positive' ? 'bg-green-500 text-white' : example.sentiment === 'negative' ? 'bg-red-500 text-white' : 'bg-gray-500 text-white'}">
+                      ${example.sentiment === 'positive' ? 'ポジティブ' : example.sentiment === 'negative' ? 'ネガティブ' : '中立'}
+                    </span>
+                    <span class="text-xs text-gray-500">[${example.source}]</span>
+                  </div>
+                  <div class="flex items-center gap-3">
+                    <span class="text-xs font-bold text-orange-600">
+                      <i class="fas fa-star mr-1"></i>影響度: ${example.impact_score}点
+                    </span>
+                    <span class="text-xs text-blue-600 font-bold">
+                      <i class="far fa-calendar mr-1"></i>${example.date_formatted}
+                    </span>
+                  </div>
+                </div>
+                <p class="font-bold text-sm mb-1">${example.headline}</p>
+                <p class="text-xs text-gray-600 mb-2">${example.summary}</p>
+                ${example.url ? `
+                  <a href="${example.url}" target="_blank" class="text-blue-600 hover:underline text-xs">
+                    <i class="fas fa-external-link-alt mr-1"></i>記事を読む
+                  </a>
+                ` : ''}
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''
+      
+      const gptInsightHtml = data.gpt_insight ? `
+        <div class="bg-purple-50 border-2 border-purple-300 rounded-lg p-4 mb-6">
+          <h3 class="font-bold text-lg mb-3 text-purple-800">
+            <i class="fas fa-robot mr-2"></i>
+            GPT-5 詳細分析（重要ニュース4件）
+          </h3>
+          <pre class="text-sm text-gray-700 whitespace-pre-wrap bg-white p-3 rounded border">${data.gpt_insight}</pre>
+          <p class="text-xs text-gray-500 mt-2">
+            <i class="fas fa-info-circle mr-1"></i>
+            ネガティブ上位2件 + ポジティブ上位2件をAIが深掘り分析
+          </p>
+        </div>
+      ` : ''
+      
+      const resultHtml = `
+        <div class="bg-gradient-to-r from-yellow-500 to-yellow-600 text-white p-6 rounded-lg mb-6">
+          <h2 class="text-3xl font-bold mb-2">
+            <i class="fas fa-newspaper mr-3"></i>
+            ${symbol} センチメント分析結果
+          </h2>
+          <p class="text-yellow-100">
+            ${data.cached ? '🚀 キャッシュヒット（1時間以内の分析結果）' : '🔥 最新分析完了'}
+          </p>
+        </div>
+
+        ${criticalAlertsHtml}
+
+        <div class="grid grid-cols-2 gap-6 mb-6">
+          <div class="bg-yellow-50 p-4 rounded-lg">
+            <h3 class="font-bold text-lg mb-3 text-yellow-800">
+              <i class="fas fa-star mr-2"></i>センチメントスコア
+            </h3>
+            <div class="text-center">
+              <p class="text-5xl font-bold text-yellow-600">${data.score}</p>
+              <p class="text-gray-600 mt-2">/ 100点</p>
+            </div>
+          </div>
+          <div class="bg-gray-50 p-4 rounded-lg">
+            <h3 class="font-bold text-lg mb-3">
+              <i class="fas fa-calculator mr-2"></i>加重スコア
+            </h3>
+            <p class="text-sm text-gray-600 mb-2">重み: 15%</p>
+            <div class="text-center">
+              <p class="text-5xl font-bold text-gray-700">${(data.score * 0.15).toFixed(1)}</p>
+              <p class="text-gray-600 mt-2">総合スコアへの寄与</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="mb-6">
+          <h3 class="font-bold text-lg mb-3 text-yellow-800">
+            <i class="fas fa-newspaper mr-2"></i>ニュース分析
+          </h3>
+          <div class="grid grid-cols-3 gap-4 mb-4">
+            <div class="bg-green-50 border-l-4 border-green-500 p-3 rounded">
+              <p class="text-sm text-gray-600">ポジティブ</p>
+              <p class="text-3xl font-bold text-green-600">${data.positive_count || 0}</p>
+            </div>
+            <div class="bg-gray-50 border-l-4 border-gray-500 p-3 rounded">
+              <p class="text-sm text-gray-600">中立</p>
+              <p class="text-3xl font-bold text-gray-600">${data.neutral_count || 0}</p>
+            </div>
+            <div class="bg-red-50 border-l-4 border-red-500 p-3 rounded">
+              <p class="text-sm text-gray-600">ネガティブ</p>
+              <p class="text-3xl font-bold text-red-600">${data.negative_count || 0}</p>
+            </div>
+          </div>
+          <div class="bg-blue-50 p-3 rounded">
+            <p class="text-sm text-gray-600">分析ニュース総数</p>
+            <p class="text-2xl font-bold text-blue-600">${data.news_count || 0}件</p>
+          </div>
+        </div>
+
+        ${gptInsightHtml}
+        ${newsExamplesHtml}
+
+        <div class="bg-gray-50 p-4 rounded-lg mb-6">
+          <h3 class="font-bold text-lg mb-3">
+            <i class="fas fa-info-circle mr-2"></i>
+            分析情報
+          </h3>
+          <div class="space-y-2 text-sm text-gray-700">
+            <p><strong>信頼度:</strong> ${data.confidence}%</p>
+            <p><strong>分析時刻:</strong> ${data.timestamp}</p>
+            <p><strong>キャッシュ:</strong> ${data.cached ? 'ヒット（1時間以内）' : 'ミス（新規分析）'}</p>
+            <p><strong>影響度スコアリング:</strong> センチメント強度60% + 新しさ20% + ソース信頼性20%</p>
+          </div>
+        </div>
+      `
+      
+      document.getElementById('sentiment-result').innerHTML = resultHtml
+    }
+  </script>
+</body>
+</html>

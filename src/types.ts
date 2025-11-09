@@ -40,10 +40,70 @@ export interface SentimentAnalysis {
     summary: string
     datetime: number
     date_formatted: string
+    url?: string
+    impact_score?: number
+    relevance_score?: number
   }>
   summary: string
   confidence: number
   gpt_insight?: string
+  critical_alerts?: Array<{
+    headline: string
+    source: string
+    sentiment_score: number
+    impact_score: number
+    relevance_score: number
+    url: string
+    datetime: number
+    date_formatted: string
+  }>
+}
+
+// Alpha Vantage News API型定義
+export interface AlphaVantageNewsArticle {
+  title: string
+  url: string
+  time_published: string
+  authors: string[]
+  summary: string
+  banner_image?: string
+  source: string
+  category_within_source: string
+  source_domain: string
+  topics: Array<{
+    topic: string
+    relevance_score: string
+  }>
+  overall_sentiment_score: number
+  overall_sentiment_label: string
+  ticker_sentiment: Array<{
+    ticker: string
+    relevance_score: string
+    ticker_sentiment_score: string
+    ticker_sentiment_label: string
+  }>
+}
+
+// ニュース影響度スコア
+export interface NewsImpactScore {
+  article: {
+    headline: string
+    summary: string
+    source: string
+    source_domain: string
+    url: string
+    datetime: number
+    date_formatted: string
+  }
+  sentiment_score: number
+  sentiment_label: string
+  relevance_score: number
+  impact_score: number
+  components: {
+    sentiment_component: number  // センチメント強度 (0-60点)
+    recency_component: number    // 新しさ (0-20点)
+    reliability_component: number // ソース信頼性 (0-20点)
+  }
 }
 
 export interface MacroAnalysis {
@@ -289,6 +349,7 @@ export interface Env {
   FINNHUB_API_KEY: string
   FRED_API_KEY: string
   OPENAI_API_KEY: string
+  CACHE: KVNamespace
 }
 
 // ランキング関連の型定義

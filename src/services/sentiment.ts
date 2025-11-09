@@ -1,12 +1,102 @@
-import type { SentimentAnalysis } from '../types'
+import type { SentimentAnalysis, NewsImpactScore } from '../types'
 import OpenAI from 'openai'
 
 interface NewsArticle {
   headline: string
   summary: string
   source: string
+  source_domain: string
+  url: string
   datetime: number
-  sentiment: string
+  ticker_sentiment_score: number
+  ticker_sentiment_label: string
+  relevance_score: number
+}
+
+/**
+ * 影響度スコアリング
+ * 
+ * 配分:
+ * - センチメント強度: 60点
+ * - 新しさ: 20点  
+ * - ソース信頼性: 20点
+ */
+function calculateImpactScore(article: NewsArticle): NewsImpactScore {
+  const now = Date.now() / 1000 // Unix timestamp
+  
+  // 1. センチメント強度 (0-60点)
+  // Alpha Vantage sentiment_score: -1.0 〜 +1.0 を 0-60に変換
+  const sentimentComponent = Math.abs(article.ticker_sentiment_score) * 60
+  
+  // 2. 新しさスコア (0-20点)
+  // 最新 = 20点、6日前 = 0点（線形減衰）
+  const ageInHours = (now - article.datetime) / 3600
+  const ageInDays = ageInHours / 24
+  const recencyComponent = Math.max(0, 20 - (ageInDays / 6) * 20)
+  
+  // 3. ソース信頼性スコア (0-20点)
+  const sourceScores: { [key: string]: number } = {
+    'reuters.com': 20,
+    'bloomberg.com': 20,
+    'wsj.com': 19,
+    'ft.com': 19,
+    'cnbc.com': 17,
+    'marketwatch.com': 16,
+    'barrons.com': 16,
+    'economist.com': 18,
+    'fool.com': 13,
+    'seekingalpha.com': 12,
+    'benzinga.com': 10,
+    'zacks.com': 10
+  }
+  
+  let reliabilityComponent = 8 // デフォルト
+  for (const [domain, score] of Object.entries(sourceScores)) {
+    if (article.source_domain.includes(domain)) {
+      reliabilityComponent = score
+      break
+    }
+  }
+  
+  // 関連性ボーナス（Alpha Vantageのrelevance_score活用）
+  const relevanceBonus = article.relevance_score * 10 // 最大+10点
+  
+  const impactScore = sentimentComponent + recencyComponent + reliabilityComponent + relevanceBonus
+  
+  return {
+    article: {
+      headline: article.headline,
+      summary: article.summary,
+      source: article.source,
+      source_domain: article.source_domain,
+      url: article.url,
+      datetime: article.datetime,
+      date_formatted: new Date(article.datetime * 1000).toISOString().split('T')[0]
+    },
+    sentiment_score: article.ticker_sentiment_score,
+    sentiment_label: article.ticker_sentiment_label,
+    relevance_score: article.relevance_score,
+    impact_score: Math.min(100, impactScore),
+    components: {
+      sentiment_component: sentimentComponent,
+      recency_component: recencyComponent,
+      reliability_component: reliabilityComponent
+    }
+  }
+}
+
+/**
+ * クリティカルネガティブアラート検出
+ * 
+ * 検出基準:
+ * 1. センチメントスコア ≤ -0.5（強いネガティブ）
+ * 2. 影響度スコア ≥ 70点（高影響度）
+ */
+function detectCriticalNegativeNews(newsWithImpact: NewsImpactScore[]): NewsImpactScore[] {
+  return newsWithImpact.filter(n => 
+    n.sentiment_score <= -0.5 &&  // 強いネガティブ
+    n.impact_score >= 70          // 高影響度
+  )
 }
 
 export async function performSentimentAnalysis(
@@ -25,44 +115,51 @@ export async function performSentimentAnalysis(
     }
   }
   
-  // キーワードベースの簡易分析
-  const positiveKeywords = [
-    'growth', 'profit', 'surge', 'beat', 'exceed', 'strong', 'rally',
-    'upgrade', 'bullish', 'positive', 'gain', 'rise', 'up', 'high',
-    '成長', '増益', '好調', '上昇', '上方修正'
-  ]
+  console.log(`[Sentiment] Analyzing ${news.length} news articles for ${symbol}`)
   
-  const negativeKeywords = [
-    'loss', 'decline', 'fall', 'miss', 'weak', 'drop', 'downgrade',
-    'bearish', 'negative', 'concern', 'risk', 'down', 'low',
-    '赤字', '減益', '低迷', '下落', '下方修正', '懸念'
-  ]
+  // 影響度スコアリング（全記事）
+  const newsWithImpact = news.map(calculateImpactScore)
   
-  let keywordScore = 50
+  // 影響度順にソート
+  newsWithImpact.sort((a, b) => b.impact_score - a.impact_score)
+  
+  // クリティカルネガティブアラート検出
+  const criticalAlerts = detectCriticalNegativeNews(newsWithImpact)
+  
+  console.log(`[Sentiment] Critical negative alerts: ${criticalAlerts.length}`)
+  
+  // センチメントスコア計算（Alpha Vantageのスコアを活用）
+  let totalSentiment = 0
   let positiveCount = 0
   let negativeCount = 0
+  let neutralCount = 0
   
-  news.forEach(article => {
-    const text = `${article.headline} ${article.summary}`.toLowerCase()
+  newsWithImpact.forEach(n => {
+    totalSentiment += n.sentiment_score
     
-    positiveKeywords.forEach(keyword => {
-      if (text.includes(keyword.toLowerCase())) {
-        keywordScore += 3
-        positiveCount++
-      }
-    })
-    
-    negativeKeywords.forEach(keyword => {
-      if (text.includes(keyword.toLowerCase())) {
-        keywordScore -= 3
-        negativeCount++
-      }
-    })
+    if (n.sentiment_score >= 0.15) {
+      positiveCount++
+    } else if (n.sentiment_score <= -0.15) {
+      negativeCount++
+    } else {
+      neutralCount++
+    }
   })
   
-  keywordScore = Math.max(0, Math.min(100, keywordScore))
+  const avgSentiment = totalSentiment / newsWithImpact.length
   
-  // GPT-5による高度な分析（最新の Responses API）
+  // スコアを0-100に変換（-1.0 〜 +1.0 → 0 〜 100）
+  const sentimentScore = Math.round(((avgSentiment + 1) / 2) * 100)
+  
+  let sentiment: 'positive' | 'negative' | 'neutral' = 'neutral'
+  if (avgSentiment >= 0.15) sentiment = 'positive'
+  else if (avgSentiment <= -0.15) sentiment = 'negative'
+  
+  // GPT-5による高度な分析（オプション）
+  // コスト削減のため、ネガティブ上位2件 + ポジティブ上位2件のみ分析
+  let gptInsight: string | undefined
+  let finalScore = sentimentScore
+  
   if (apiKey) {
     try {
       const openai = new OpenAI({ 
@@ -70,21 +167,39 @@ export async function performSentimentAnalysis(
         organization: 'org-C3x5ZVIvaiCoQSoLIKqg9X5E'
       })
       
-      const newsText = news.slice(0, 10).map(n => 
-        `[${n.source}] ${n.headline}\n${n.summary}`
+      // ネガティブニュース（センチメント順でソート）とポジティブニュースを分離
+      const negativeNews = newsWithImpact
+        .filter(n => n.sentiment_score < -0.15)
+        .sort((a, b) => a.sentiment_score - b.sentiment_score) // 最もネガティブから順に
+        .slice(0, 2)
+      
+      const positiveNews = newsWithImpact
+        .filter(n => n.sentiment_score > 0.15)
+        .sort((a, b) => b.sentiment_score - a.sentiment_score) // 最もポジティブから順に
+        .slice(0, 2)
+      
+      const selectedNews = [...negativeNews, ...positiveNews]
+      
+      if (selectedNews.length === 0) {
+        // ネガティブ・ポジティブがない場合は影響度上位4件
+        selectedNews.push(...newsWithImpact.slice(0, 4))
+      }
+      
+      const newsText = selectedNews.map(n => 
+        `[${n.article.source}] ${n.article.headline}\n${n.article.summary}\nセンチメント: ${n.sentiment_score} (${n.sentiment_label})\n影響度: ${Math.round(n.impact_score)}点`
       ).join('\n\n')
       
       const prompt = `
-あなたは金融市場の専門アナリストです。以下の${symbol}に関するニュース記事を分析し、株価への影響を評価してください。
+あなたは金融市場の専門アナリストです。以下の${symbol}に関する重要ニュース記事（ネガティブ上位2件 + ポジティブ上位2件）を分析し、株価への影響を評価してください。
 
-【ニュース記事】
+【重要ニュース記事】
 ${newsText}
 
 【分析項目】
 1. 全体的なセンチメント（ポジティブ/ネガティブ/中立）
 2. 株価への影響スコア（0-100点、50が中立）
-3. 主要なポジティブ要因（3つ以内）
-4. 主要なネガティブ要因（3つ以内）
+3. 主要なポジティブ要因（2つ以内）
+4. 主要なネガティブ要因（2つ以内）
 5. 総合的な見解（100文字程度）
 
 JSON形式で回答してください：
@@ -97,117 +212,68 @@ JSON形式で回答してください：
 }
 `
       
-      // GPT-5 Responses APIを使用（Colab動作確認済み）
       const response = await openai.responses.create({
         model: 'gpt-5',
         input: prompt
       })
       
-      // レスポンスからJSON部分を抽出（output_textプロパティを使用）
       const responseText = response.output_text || response.output?.[0]?.content?.[0]?.text || '{}'
       const gptAnalysis = JSON.parse(responseText)
       
-      // GPT-5のスコアとキーワードスコアを統合（GPT-5に70%の重み）
-      const finalScore = (gptAnalysis.score * 0.7) + (keywordScore * 0.3)
+      // GPT-5のスコアとAlpha Vantageスコアを統合（GPT-5に70%の重み）
+      finalScore = Math.round((gptAnalysis.score * 0.7) + (sentimentScore * 0.3))
+      sentiment = gptAnalysis.sentiment || sentiment
       
-      // ニュース記事を個別に分類
-      const articleSentiments = news.slice(0, 20).map(article => {
-        const text = `${article.headline} ${article.summary}`.toLowerCase()
-        let score = 0
-        positiveKeywords.forEach(keyword => {
-          if (text.includes(keyword.toLowerCase())) score++
-        })
-        negativeKeywords.forEach(keyword => {
-          if (text.includes(keyword.toLowerCase())) score--
-        })
-        
-        if (score > 0) return 'positive'
-        else if (score < 0) return 'negative'
-        else return 'neutral'
-      })
+      gptInsight = JSON.stringify({
+        positive_factors: gptAnalysis.positive_factors || [],
+        negative_factors: gptAnalysis.negative_factors || [],
+        summary: gptAnalysis.summary || ''
+      }, null, 2)
       
-      const positiveNewsCount = articleSentiments.filter(s => s === 'positive').length
-      const negativeNewsCount = articleSentiments.filter(s => s === 'negative').length
-      const neutralNewsCount = articleSentiments.filter(s => s === 'neutral').length
-      
-      // ニュース判断例を作成(最大5件) - 日付情報を追加
-      const newsExamples = news.slice(0, 5).map((article, idx) => ({
-        headline: article.headline,
-        source: article.source,
-        sentiment: articleSentiments[idx],
-        summary: article.summary.substring(0, 100) + '...',
-        datetime: article.datetime,  // Unix timestamp
-        date_formatted: new Date(article.datetime * 1000).toISOString().split('T')[0]  // YYYY-MM-DD
-      }))
-      
-      return {
-        score: Math.round(finalScore),
-        sentiment: gptAnalysis.sentiment || 'neutral',
-        news_count: news.length,
-        positive_count: positiveNewsCount,
-        negative_count: negativeNewsCount,
-        neutral_count: neutralNewsCount,
-        summary: gptAnalysis.summary || 'GPT-4o分析結果を取得できませんでした',
-        confidence: 90,
-        news_examples: newsExamples,
-        gpt_insight: JSON.stringify({
-          positive_factors: gptAnalysis.positive_factors || [],
-          negative_factors: gptAnalysis.negative_factors || []
-        }, null, 2)
-      }
+      console.log(`[Sentiment] GPT-5 analysis completed. Final score: ${finalScore}`)
       
     } catch (error) {
-      console.error('GPT-4o分析エラー:', error)
-      console.error('Error details:', error instanceof Error ? error.message : String(error))
-      // GPT-4oが失敗した場合はキーワードベースにフォールバック
+      console.error('[Sentiment] GPT-5 analysis error:', error)
+      // GPT-5が失敗した場合はAlpha Vantageスコアのみ使用
     }
   }
   
-  // キーワードベース分析の結果を返す
-  let sentiment: 'positive' | 'negative' | 'neutral' = 'neutral'
-  if (keywordScore > 60) sentiment = 'positive'
-  else if (keywordScore < 40) sentiment = 'negative'
-  
-  // ニュース記事を個別に分類(キーワードベース)
-  const articleSentiments = news.map(article => {
-    const text = `${article.headline} ${article.summary}`.toLowerCase()
-    let score = 0
-    positiveKeywords.forEach(keyword => {
-      if (text.includes(keyword.toLowerCase())) score++
-    })
-    negativeKeywords.forEach(keyword => {
-      if (text.includes(keyword.toLowerCase())) score--
-    })
-    
-    if (score > 0) return 'positive'
-    else if (score < 0) return 'negative'
-    else return 'neutral'
-  })
-  
-  const positiveNewsCount = articleSentiments.filter(s => s === 'positive').length
-  const negativeNewsCount = articleSentiments.filter(s => s === 'negative').length
-  const neutralNewsCount = articleSentiments.filter(s => s === 'neutral').length
-  
-  // ニュース判断例を作成(最大5件) - 日付情報を追加
-  const newsExamples = news.slice(0, 5).map((article, idx) => ({
-    headline: article.headline,
-    source: article.source,
-    sentiment: articleSentiments[idx],
-    summary: article.summary.substring(0, 100) + '...',
-    datetime: article.datetime,  // Unix timestamp
-    date_formatted: new Date(article.datetime * 1000).toISOString().split('T')[0]  // YYYY-MM-DD
+  // ニュース例を作成（影響度上位20件）
+  const newsExamples = newsWithImpact.slice(0, 20).map(n => ({
+    headline: n.article.headline,
+    source: n.article.source,
+    sentiment: n.sentiment_label.toLowerCase(),
+    summary: n.article.summary.substring(0, 100) + '...',
+    datetime: n.article.datetime,
+    date_formatted: n.article.date_formatted,
+    url: n.article.url,
+    impact_score: Math.round(n.impact_score),
+    relevance_score: n.relevance_score
   }))
   
+  // クリティカルアラート情報
+  const critical_alerts = criticalAlerts.length > 0 ? criticalAlerts.map(n => ({
+    headline: n.article.headline,
+    source: n.article.source,
+    sentiment_score: n.sentiment_score,
+    impact_score: Math.round(n.impact_score),
+    relevance_score: n.relevance_score,
+    url: n.article.url,
+    datetime: n.article.datetime,
+    date_formatted: n.article.date_formatted
+  })) : undefined
+  
   return {
-    score: keywordScore,
+    score: finalScore,
     sentiment,
     news_count: news.length,
-    positive_count: positiveNewsCount,
-    negative_count: negativeNewsCount,
-    neutral_count: neutralNewsCount,
+    positive_count: positiveCount,
+    negative_count: negativeCount,
+    neutral_count: neutralCount,
     news_examples: newsExamples,
-    summary: `ポジティブ: ${positiveNewsCount}件、ネガティブ: ${negativeNewsCount}件、中立: ${neutralNewsCount}件`,
-    confidence: 60,
-    gpt_insight: 'GPT-4o APIキーが提供されていないため、キーワードベース分析のみ実行'
+    summary: `ポジティブ: ${positiveCount}件、ネガティブ: ${negativeCount}件、中立: ${neutralCount}件`,
+    confidence: apiKey ? 90 : 75,
+    gpt_insight: gptInsight,
+    critical_alerts: critical_alerts
   }
 }

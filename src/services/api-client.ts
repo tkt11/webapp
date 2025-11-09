@@ -123,8 +123,78 @@ export async function fetchFinancialMetrics(symbol: string, apiKey: string) {
   }
 }
 
-// Finnhub: ニュース取得
+// Alpha Vantage: ニュース取得（センチメント分析付き）
+export async function fetchAlphaVantageNews(
+  symbol: string,
+  apiKey: string,
+  limit: number = 40
+) {
+  const today = new Date()
+  const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
+  
+  // Alpha Vantage時刻フォーマット: YYYYMMDDTHHMM
+  const timeFrom = formatAlphaVantageTime(weekAgo)
+  const timeTo = formatAlphaVantageTime(today)
+  
+  const url = `https://www.alphavantage.co/query?function=NEWS_SENTIMENT&tickers=${symbol}&time_from=${timeFrom}&time_to=${timeTo}&limit=${limit}&sort=LATEST&apikey=${apiKey}`
+  
+  console.log(`[API] Fetching Alpha Vantage news for ${symbol}...`)
+  const response = await fetch(url)
+  const data = await response.json()
+  
+  if (data.feed && Array.isArray(data.feed)) {
+    console.log(`[API] Fetched ${data.feed.length} news articles for ${symbol}`)
+    
+    // Alpha Vantage形式を統一形式に変換
+    return data.feed.map((article: any) => {
+      const tickerSentiment = article.ticker_sentiment?.find((t: any) => t.ticker === symbol) || {}
+      
+      return {
+        headline: article.title,
+        summary: article.summary,
+        source: article.source,
+        source_domain: article.source_domain,
+        url: article.url,
+        datetime: parseAlphaVantageTime(article.time_published),
+        authors: article.authors || [],
+        overall_sentiment_score: article.overall_sentiment_score,
+        overall_sentiment_label: article.overall_sentiment_label,
+        ticker_sentiment_score: parseFloat(tickerSentiment.ticker_sentiment_score || '0'),
+        ticker_sentiment_label: tickerSentiment.ticker_sentiment_label || 'Neutral',
+        relevance_score: parseFloat(tickerSentiment.relevance_score || '0'),
+        topics: article.topics || []
+      }
+    })
+  }
+  
+  console.log(`[API] No news feed found in response`)
+  return []
+}
+
+function formatAlphaVantageTime(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${year}${month}${day}T${hours}${minutes}`
+}
+
+function parseAlphaVantageTime(timeStr: string): number {
+  // "20231115T143000" → Unix timestamp
+  const year = parseInt(timeStr.substring(0, 4))
+  const month = parseInt(timeStr.substring(4, 6)) - 1
+  const day = parseInt(timeStr.substring(6, 8))
+  const hour = parseInt(timeStr.substring(9, 11))
+  const minute = parseInt(timeStr.substring(11, 13))
+  const second = parseInt(timeStr.substring(13, 15) || '0')
+  
+  return new Date(year, month, day, hour, minute, second).getTime() / 1000
+}
+
+// Finnhub: ニュース取得（廃止予定 - Alpha Vantageに移行）
 export async function fetchNews(symbol: string, apiKey: string, limit: number = 20) {
+  console.warn('[DEPRECATED] fetchNews() is deprecated. Use fetchAlphaVantageNews() instead.')
   const today = new Date()
   const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
   
