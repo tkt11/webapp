@@ -1,541 +1,4 @@
-import { Hono } from 'hono'
-import { cors } from 'hono/cors'
-import type { Env } from './types'
-import { performTechnicalAnalysis } from './services/technical'
-import { performFundamentalAnalysis } from './services/fundamental'
-import { performSentimentAnalysis } from './services/sentiment'
-import { analyzeMacroEconomics } from './services/macro'
-import { analyzeAnalystRating } from './services/analyst'
-import { generatePrediction, generateDetailedExplanation, generateFuturePrediction, generateBackfitPrediction, generateMLPrediction, generateGPT5FinalJudgment } from './services/prediction'
-import { runInvestmentSimulation, runBacktest } from './services/simulation'
-import {
-  fetchStockPrices,
-  fetchCurrentPrice,
-  fetchFinancialMetrics,
-  fetchNews,
-  fetchAnalystRatings,
-  fetchTargetPrice,
-  fetchMacroIndicators,
-  SP500_TOP_50
-} from './services/api-client'
 
-const app = new Hono<{ Bindings: Env }>()
-
-// CORS設定
-app.use('/api/*', cors())
-
-// ヘルスチェック
-app.get('/api/health', (c) => {
-  return c.json({ status: 'ok', message: 'Stock AI Predictor API is running' })
-})
-
-// 銘柄分析API
-app.post('/api/analyze', async (c) => {
-  try {
-    const { symbol, trainModel = false, enableBackfit = false } = await c.req.json()
-    
-    if (!symbol) {
-      return c.json({ error: '銘柄コードが必要です' }, 400)
-    }
-    
-    const env = c.env
-    
-    // 環境変数チェック
-    if (!env.ML_API_URL) {
-      console.error('[ERROR] ML_API_URL is not set in environment variables')
-    } else {
-      console.log(`[INFO] ML_API_URL: ${env.ML_API_URL}`)
-    }
-    
-    const { cache } = await import('./services/cache')
-    // v2: ML API統合対応（古いキャッシュを無効化）
-    const cacheKey = `analysis:v2:${symbol}:${trainModel}:${enableBackfit}`
-    
-    // キャッシュチェック（デバッグ中は無効化）
-    const ENABLE_CACHE = false  // デバッグ後はtrueに戻す
-    const cached = ENABLE_CACHE ? cache.get(cacheKey) : null
-    if (cached) {
-      console.log(`[CACHE] Returning cached analysis for ${symbol}`)
-      return c.json(cached)
-    } else if (!ENABLE_CACHE) {
-      console.log(`[CACHE] Cache disabled for debugging`)
-    }
-    
-    console.log(`[ANALYZE] Analyzing ${symbol} with trainModel=${trainModel}, enableBackfit=${enableBackfit}`)
-    
-    // 並列でデータ取得
-    const [
-      stockData,
-      currentPrice,
-      financialMetrics,
-      news,
-      analystRatings,
-      targetPrice,
-      macroIndicators
-    ] = await Promise.all([
-      fetchStockPrices(symbol, env.ALPHA_VANTAGE_API_KEY),
-      fetchCurrentPrice(symbol, env.FINNHUB_API_KEY),
-      fetchFinancialMetrics(symbol, env.FINNHUB_API_KEY),
-      fetchNews(symbol, env.FINNHUB_API_KEY),
-      fetchAnalystRatings(symbol, env.FINNHUB_API_KEY),
-      fetchTargetPrice(symbol, env.FINNHUB_API_KEY),
-      fetchMacroIndicators(env.FRED_API_KEY)
-    ])
-    
-    // 各分析を実行
-    const technical = performTechnicalAnalysis(stockData.prices)
-    const fundamental = performFundamentalAnalysis(financialMetrics)
-    const sentiment = await performSentimentAnalysis(news, symbol, env.OPENAI_API_KEY)
-    const macro = analyzeMacroEconomics(macroIndicators)
-    const analyst = analyzeAnalystRating(
-      { ...analystRatings, target_price: targetPrice },
-      currentPrice
-    )
-    
-    // 予測生成
-    const prediction = generatePrediction(
-      technical,
-      fundamental,
-      sentiment,
-      macro,
-      analyst,
-      currentPrice,
-      symbol
-    )
-    
-    // GPT-5による詳細解説
-    const detailedExplanation = await generateDetailedExplanation(
-      prediction,
-      symbol,
-      technical,
-      fundamental,
-      sentiment,
-      env.OPENAI_API_KEY
-    )
-    
-    // 未来30日の予測を生成
-    const futurePrediction = generateFuturePrediction(
-      currentPrice,
-      prediction.score,
-      technical,
-      prediction.action,
-      stockData.prices.slice(-30)
-    )
-    
-    // 過去30日の予測(バックフィット)を生成し精度評価
-    const backfitPrediction = generateBackfitPrediction(
-      stockData.dates.slice(-30),
-      stockData.prices.slice(-30),
-      prediction.score,
-      technical
-    )
-    
-    // ML予測を生成（並行表示用）
-    console.log(`[ML] Calling generateMLPrediction for ${symbol}...`)
-    console.log(`[ML] Parameters: trainModel=${trainModel}, enableBackfit=${enableBackfit}, ML_API_URL=${env.ML_API_URL}`)
-    const mlResult = await generateMLPrediction(
-      symbol,
-      stockData.prices,
-      technical,
-      fundamental,
-      sentiment,
-      trainModel,  // 学習フラグを渡す
-      enableBackfit,  // バックフィット検証フラグを渡す
-      env.ML_API_URL  // ML API URLを環境変数から取得
-    )
-    console.log(`[ML] generateMLPrediction completed`)
-    console.log(`[ML] Result summary:`, {
-      has_prediction: !!mlResult.prediction,
-      has_training: !!mlResult.training,
-      has_future_predictions: !!mlResult.training?.future_predictions
-    })
-    if (mlResult.training) {
-      console.log(`[ML] Training result:`, mlResult.training)
-    }
-    
-    // GPT-5による最終判断を生成（全データを統合分析）
-    console.log('Generating GPT-5 final judgment with all analysis data...')
-    let gpt5FinalJudgment = null
-    try {
-      gpt5FinalJudgment = await generateGPT5FinalJudgment(
-        symbol,
-        currentPrice,
-        prediction,
-        technical,
-        fundamental,
-        sentiment,
-        macro,
-        analyst,
-        mlResult.prediction,
-        mlResult.training,
-        backfitPrediction.accuracy,
-        futurePrediction,
-        env.OPENAI_API_KEY
-      )
-    } catch (gpt5Error) {
-      console.error('[WARN] GPT-5 final judgment failed, continuing without it:', gpt5Error)
-      gpt5FinalJudgment = null
-    }
-    
-    const result = {
-      symbol,
-      current_price: currentPrice,
-      prediction: {
-        ...prediction,
-        detailed_explanation: detailedExplanation,
-        future: futurePrediction,
-        backfit: backfitPrediction,
-        ml_prediction: mlResult.prediction,  // ML予測
-        ml_training: mlResult.training,      // 学習結果（存在する場合）
-        gpt5_final_judgment: gpt5FinalJudgment  // GPT-5最終判断
-      },
-      analysis: {
-        technical,
-        fundamental,
-        sentiment,
-        macro,
-        analyst
-      },
-      chart_data: {
-        dates: stockData.dates.slice(-30),
-        prices: stockData.prices.slice(-30)
-      },
-      // デバッグ情報
-      debug: {
-        ml_api_url_configured: !!env.ML_API_URL,
-        ml_api_url: env.ML_API_URL ? `${env.ML_API_URL.substring(0, 30)}...` : 'NOT SET',
-        train_model_requested: trainModel,
-        ml_prediction_exists: !!mlResult.prediction,
-        ml_training_exists: !!mlResult.training
-      }
-    }
-    
-    // キャッシュに保存（30分）
-    cache.set(cacheKey, result, 30 * 60 * 1000)
-    
-    return c.json(result)
-    
-  } catch (error: any) {
-    console.error('[ERROR] 分析エラー:', error)
-    console.error('[ERROR] Error stack:', error.stack)
-    return c.json({ 
-      error: '分析中にエラーが発生しました', 
-      details: error.message,
-      stack: error.stack?.split('\n').slice(0, 3).join('\n') // First 3 lines of stack
-    }, 500)
-  }
-})
-
-// おすすめ銘柄TOP10 API
-app.get('/api/recommendations', async (c) => {
-  try {
-    const env = c.env
-    
-    // S&P 500主要銘柄を並列分析（軽量化: 15銘柄のみ）
-    const batchSize = 5
-    const allRecommendations = []
-    const maxStocks = 15  // 15銘柄に制限
-    
-    for (let i = 0; i < Math.min(maxStocks, SP500_TOP_50.length); i += batchSize) {
-      const batch = SP500_TOP_50.slice(i, i + batchSize)
-      
-      const batchResults = await Promise.all(
-        batch.map(async (symbol) => {
-          try {
-            const [stockData, currentPrice, financialMetrics, news, analystRatings, targetPrice, macroIndicators] = 
-              await Promise.all([
-                fetchStockPrices(symbol, env.ALPHA_VANTAGE_API_KEY),
-                fetchCurrentPrice(symbol, env.FINNHUB_API_KEY),
-                fetchFinancialMetrics(symbol, env.FINNHUB_API_KEY),
-                fetchNews(symbol, env.FINNHUB_API_KEY),
-                fetchAnalystRatings(symbol, env.FINNHUB_API_KEY),
-                fetchTargetPrice(symbol, env.FINNHUB_API_KEY),
-                fetchMacroIndicators(env.FRED_API_KEY)
-              ])
-            
-            const technical = performTechnicalAnalysis(stockData.prices)
-            const fundamental = performFundamentalAnalysis(financialMetrics)
-            const sentiment = await performSentimentAnalysis(news, symbol, env.OPENAI_API_KEY)
-            const macro = analyzeMacroEconomics(macroIndicators)
-            const analyst = analyzeAnalystRating(
-              { ...analystRatings, target_price: targetPrice },
-              currentPrice
-            )
-            
-            const prediction = generatePrediction(technical, fundamental, sentiment, macro, analyst, currentPrice, symbol)
-            
-            return {
-              symbol,
-              name: symbol,
-              score: prediction.score,
-              action: prediction.action,
-              currentPrice,
-              targetPrice: prediction.target_price,
-              expectedReturn: prediction.expected_return,
-              confidence: prediction.confidence,
-              sector: 'Technology', // セクター情報は簡略化
-              reasons: prediction.reasons.slice(0, 3)
-            }
-          } catch (error) {
-            console.error(`${symbol}の分析エラー:`, error)
-            return null
-          }
-        })
-      )
-      
-      allRecommendations.push(...batchResults.filter(r => r !== null))
-      
-      // レート制限対策：バッチ間で0.5秒待機
-      if (i + batchSize < maxStocks) {
-        await new Promise(resolve => setTimeout(resolve, 500))
-      }
-    }
-    
-    // スコア降順でソート、TOP10を抽出
-    const top10 = allRecommendations
-      .sort((a, b) => b!.score - a!.score)
-      .slice(0, 10)
-    
-    return c.json({
-      recommendations: top10,
-      generated_at: new Date().toISOString()
-    })
-    
-  } catch (error: any) {
-    console.error('推奨銘柄取得エラー:', error)
-    return c.json({ 
-      error: '推奨銘柄の取得中にエラーが発生しました',
-      details: error.message
-    }, 500)
-  }
-})
-
-// 投資シミュレーションAPI
-app.post('/api/simulation', async (c) => {
-  try {
-    const { symbol, purchaseDate, sellDate, investmentAmount } = await c.req.json()
-    
-    if (!symbol || !purchaseDate || !sellDate || !investmentAmount) {
-      return c.json({ error: '必要なパラメータが不足しています' }, 400)
-    }
-    
-    const env = c.env
-    const result = await runInvestmentSimulation(
-      symbol,
-      purchaseDate,
-      sellDate,
-      investmentAmount,
-      env.ALPHA_VANTAGE_API_KEY
-    )
-    
-    return c.json(result)
-    
-  } catch (error: any) {
-    console.error('シミュレーションエラー:', error)
-    return c.json({ 
-      error: 'シミュレーション中にエラーが発生しました',
-      details: error.message
-    }, 500)
-  }
-})
-
-// バックテストAPI
-app.post('/api/backtest', async (c) => {
-  try {
-    const { symbol, testDate } = await c.req.json()
-    
-    if (!symbol || !testDate) {
-      return c.json({ error: '銘柄コードとテスト日付が必要です' }, 400)
-    }
-    
-    const env = c.env
-    
-    // その時点でのデータで予測を生成
-    const [stockData, currentPrice, financialMetrics, news, analystRatings, targetPrice, macroIndicators] = 
-      await Promise.all([
-        fetchStockPrices(symbol, env.ALPHA_VANTAGE_API_KEY),
-        fetchCurrentPrice(symbol, env.FINNHUB_API_KEY),
-        fetchFinancialMetrics(symbol, env.FINNHUB_API_KEY),
-        fetchNews(symbol, env.FINNHUB_API_KEY),
-        fetchAnalystRatings(symbol, env.FINNHUB_API_KEY),
-        fetchTargetPrice(symbol, env.FINNHUB_API_KEY),
-        fetchMacroIndicators(env.FRED_API_KEY)
-      ])
-    
-    const technical = performTechnicalAnalysis(stockData.prices)
-    const fundamental = performFundamentalAnalysis(financialMetrics)
-    const sentiment = await performSentimentAnalysis(news, symbol, env.OPENAI_API_KEY)
-    const macro = analyzeMacroEconomics(macroIndicators)
-    const analyst = analyzeAnalystRating(
-      { ...analystRatings, target_price: targetPrice },
-      currentPrice
-    )
-    
-    const prediction = generatePrediction(technical, fundamental, sentiment, macro, analyst, currentPrice, symbol)
-    
-    // バックテスト実行
-    const backtestResult = await runBacktest(
-      symbol,
-      testDate,
-      prediction,
-      env.ALPHA_VANTAGE_API_KEY
-    )
-    
-    return c.json(backtestResult)
-    
-  } catch (error: any) {
-    console.error('バックテストエラー:', error)
-    return c.json({ 
-      error: 'バックテスト中にエラーが発生しました',
-      details: error.message
-    }, 500)
-  }
-})
-
-// ===== ランキングAPI =====
-
-// おすすめTOP10ランキング
-app.post('/api/rankings/recommended', async (c) => {
-  try {
-    const { env } = c
-    const { cache } = await import('./services/cache')
-    const cacheKey = 'ranking:recommended'
-    
-    // キャッシュチェック
-    const cached = cache.get(cacheKey)
-    if (cached) {
-      console.log('Returning cached recommended ranking (fast path)')
-      return c.json(cached)
-    }
-    
-    // キャッシュなし → 同期的に生成（初回のみ時間がかかる）
-    console.log('[NO CACHE], generating recommended ranking...')
-    const { getRecommendedRanking } = await import('./services/ranking')
-    
-    const result = await getRecommendedRanking({
-      alphaVantage: env.ALPHA_VANTAGE_API_KEY,
-      finnhub: env.FINNHUB_API_KEY
-    })
-    
-    console.log('[OK] Recommended ranking generated successfully')
-    return c.json(result)
-  } catch (error: any) {
-    console.error('Recommended ranking error:', error)
-    return c.json({
-      error: 'おすすめランキングの取得に失敗しました',
-      details: error.message
-    }, 500)
-  }
-})
-
-// 高成長×信頼度ランキング
-app.post('/api/rankings/high-growth', async (c) => {
-  try {
-    const { env } = c
-    const { timeframe = '90d' } = await c.req.json()
-    const { cache } = await import('./services/cache')
-    const cacheKey = `ranking:high-growth:${timeframe}`
-    
-    // キャッシュチェック
-    const cached = cache.get(cacheKey)
-    if (cached) {
-      console.log(`Returning cached high-growth ranking for ${timeframe} (fast path)`)
-      return c.json(cached)
-    }
-    
-    // キャッシュなし → 同期的に生成（初回のみ時間がかかる）
-    console.log(`[NO CACHE], generating high-growth ranking for ${timeframe}...`)
-    const { getHighGrowthRanking } = await import('./services/ranking-highgrowth')
-    
-    const result = await getHighGrowthRanking(timeframe, {
-      alphaVantage: env.ALPHA_VANTAGE_API_KEY,
-      finnhub: env.FINNHUB_API_KEY,
-      openai: env.OPENAI_API_KEY,
-      fred: env.FRED_API_KEY
-    })
-    
-    console.log('[OK] High-growth ranking generated successfully')
-    return c.json(result)
-  } catch (error: any) {
-    console.error('High-growth ranking error:', error)
-    return c.json({
-      error: '高成長ランキングの取得に失敗しました',
-      details: error.message
-    }, 500)
-  }
-})
-
-// 短期トレードランキング
-app.post('/api/rankings/short-term', async (c) => {
-  try {
-    const { env } = c
-    const { cache } = await import('./services/cache')
-    const cacheKey = 'ranking:short-term'
-    
-    // キャッシュチェック
-    const cached = cache.get(cacheKey)
-    if (cached) {
-      console.log('Returning cached short-term ranking (fast path)')
-      return c.json(cached)
-    }
-    
-    // キャッシュなし → 同期的に生成（初回のみ時間がかかる）
-    console.log('[NO CACHE], generating short-term ranking...')
-    const { getShortTermRanking } = await import('./services/ranking-shortterm')
-    
-    const result = await getShortTermRanking({
-      alphaVantage: env.ALPHA_VANTAGE_API_KEY,
-      finnhub: env.FINNHUB_API_KEY
-    })
-    
-    console.log('[OK] Short-term ranking generated successfully')
-    return c.json(result)
-  } catch (error: any) {
-    console.error('Short-term ranking error:', error)
-    return c.json({
-      error: '短期トレードランキングの取得に失敗しました',
-      details: error.message
-    }, 500)
-  }
-})
-
-// 注目株ランキング
-app.post('/api/rankings/trending', async (c) => {
-  try {
-    const { env } = c
-    const { cache } = await import('./services/cache')
-    const cacheKey = 'ranking:trending'
-    
-    // キャッシュチェック
-    const cached = cache.get(cacheKey)
-    if (cached) {
-      console.log('Returning cached trending ranking (fast path)')
-      return c.json(cached)
-    }
-    
-    // キャッシュなし → 同期的に生成（初回のみ時間がかかる）
-    console.log('[NO CACHE], generating trending ranking...')
-    const { getTrendingRanking } = await import('./services/ranking-trending')
-    
-    const result = await getTrendingRanking({
-      alphaVantage: env.ALPHA_VANTAGE_API_KEY,
-      finnhub: env.FINNHUB_API_KEY
-    })
-    
-    console.log('[OK] Trending ranking generated successfully')
-    return c.json(result)
-  } catch (error: any) {
-    console.error('Trending ranking error:', error)
-    return c.json({
-      error: '注目株ランキングの取得に失敗しました',
-      details: error.message
-    }, 500)
-  }
-})
-
-// メインページ
-app.get('/', (c) => {
-  return c.html(`
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -1075,7 +538,7 @@ app.get('/', (c) => {
         
         if (dimension === 'technical') {
         const tech = data.analysis.technical
-        content = \`
+        content = `
           <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-6">
             <div class="flex justify-between items-center">
               <h2 class="text-3xl font-bold"><i class="fas fa-chart-line mr-3"></i>テクニカル分析詳細</h2>
@@ -1088,7 +551,7 @@ app.get('/', (c) => {
               <div class="bg-blue-50 p-4 rounded-lg">
                 <h3 class="font-bold text-lg mb-3 text-blue-800"><i class="fas fa-star mr-2"></i>テクニカルスコア</h3>
                 <div class="text-center">
-                  <p class="text-5xl font-bold text-blue-600">\${tech.score}</p>
+                  <p class="text-5xl font-bold text-blue-600">${tech.score}</p>
                   <p class="text-gray-600 mt-2">/ 100点</p>
                 </div>
               </div>
@@ -1096,7 +559,7 @@ app.get('/', (c) => {
                 <h3 class="font-bold text-lg mb-3"><i class="fas fa-calculator mr-2"></i>加重スコア</h3>
                 <p class="text-sm text-gray-600 mb-2">重み: 35%</p>
                 <div class="text-center">
-                  <p class="text-5xl font-bold text-gray-700">\${(tech.score * 0.35).toFixed(1)}</p>
+                  <p class="text-5xl font-bold text-gray-700">${(tech.score * 0.35).toFixed(1)}</p>
                   <p class="text-gray-600 mt-2">総合スコアへの寄与</p>
                 </div>
               </div>
@@ -1107,21 +570,21 @@ app.get('/', (c) => {
               <div class="grid grid-cols-2 gap-4">
                 <div class="border-l-4 border-blue-500 pl-4 py-2">
                   <p class="text-sm text-gray-600">RSI (相対力指数)</p>
-                  <p class="text-2xl font-bold">\${tech.rsi?.toFixed(2) || 'N/A'}</p>
-                  <p class="text-xs text-gray-500 mt-1">\${tech.rsi < 30 ? '売られすぎ' : tech.rsi > 70 ? '買われすぎ' : '中立'}</p>
+                  <p class="text-2xl font-bold">${tech.rsi?.toFixed(2) || 'N/A'}</p>
+                  <p class="text-xs text-gray-500 mt-1">${tech.rsi < 30 ? '売られすぎ' : tech.rsi > 70 ? '買われすぎ' : '中立'}</p>
                 </div>
                 <div class="border-l-4 border-green-500 pl-4 py-2">
                   <p class="text-sm text-gray-600">MACD</p>
-                  <p class="text-2xl font-bold">\${tech.macd?.macd?.toFixed(4) || 'N/A'}</p>
-                  <p class="text-xs text-gray-500 mt-1">\${tech.macd?.macd > 0 ? '上昇トレンド' : '下降トレンド'}</p>
+                  <p class="text-2xl font-bold">${tech.macd?.macd?.toFixed(4) || 'N/A'}</p>
+                  <p class="text-xs text-gray-500 mt-1">${tech.macd?.macd > 0 ? '上昇トレンド' : '下降トレンド'}</p>
                 </div>
                 <div class="border-l-4 border-yellow-500 pl-4 py-2">
                   <p class="text-sm text-gray-600">短期MA (20日)</p>
-                  <p class="text-2xl font-bold">$\${tech.sma20?.toFixed(2) || 'N/A'}</p>
+                  <p class="text-2xl font-bold">$${tech.sma20?.toFixed(2) || 'N/A'}</p>
                 </div>
                 <div class="border-l-4 border-purple-500 pl-4 py-2">
                   <p class="text-sm text-gray-600">長期MA (50日)</p>
-                  <p class="text-2xl font-bold">$\${tech.sma50?.toFixed(2) || 'N/A'}</p>
+                  <p class="text-2xl font-bold">$${tech.sma50?.toFixed(2) || 'N/A'}</p>
                 </div>
               </div>
             </div>
@@ -1134,10 +597,10 @@ app.get('/', (c) => {
               </ul>
             </div>
           </div>
-        \`
+        `
       } else if (dimension === 'fundamental') {
         const fund = data.analysis.fundamental
-        content = \`
+        content = `
           <div class="bg-gradient-to-r from-green-600 to-green-700 text-white p-6">
             <div class="flex justify-between items-center">
               <h2 class="text-3xl font-bold"><i class="fas fa-building mr-3"></i>ファンダメンタル分析詳細</h2>
@@ -1150,7 +613,7 @@ app.get('/', (c) => {
               <div class="bg-green-50 p-4 rounded-lg">
                 <h3 class="font-bold text-lg mb-3 text-green-800"><i class="fas fa-star mr-2"></i>ファンダメンタルスコア</h3>
                 <div class="text-center">
-                  <p class="text-5xl font-bold text-green-600">\${fund.score}</p>
+                  <p class="text-5xl font-bold text-green-600">${fund.score}</p>
                   <p class="text-gray-600 mt-2">/ 100点</p>
                 </div>
               </div>
@@ -1158,7 +621,7 @@ app.get('/', (c) => {
                 <h3 class="font-bold text-lg mb-3"><i class="fas fa-calculator mr-2"></i>加重スコア</h3>
                 <p class="text-sm text-gray-600 mb-2">重み: 30%</p>
                 <div class="text-center">
-                  <p class="text-5xl font-bold text-gray-700">\${(fund.score * 0.30).toFixed(1)}</p>
+                  <p class="text-5xl font-bold text-gray-700">${(fund.score * 0.30).toFixed(1)}</p>
                   <p class="text-gray-600 mt-2">総合スコアへの寄与</p>
                 </div>
               </div>
@@ -1169,23 +632,23 @@ app.get('/', (c) => {
               <div class="grid grid-cols-2 gap-4">
                 <div class="border-l-4 border-blue-500 pl-4 py-2">
                   <p class="text-sm text-gray-600">PER (株価収益率)</p>
-                  <p class="text-2xl font-bold">\${fund.pe_ratio?.toFixed(2) || 'N/A'}</p>
-                  <p class="text-xs text-gray-500 mt-1">\${!fund.pe_ratio ? '-' : fund.pe_ratio < 15 ? '割安' : fund.pe_ratio > 25 ? '割高' : '適正'}</p>
+                  <p class="text-2xl font-bold">${fund.pe_ratio?.toFixed(2) || 'N/A'}</p>
+                  <p class="text-xs text-gray-500 mt-1">${!fund.pe_ratio ? '-' : fund.pe_ratio < 15 ? '割安' : fund.pe_ratio > 25 ? '割高' : '適正'}</p>
                 </div>
                 <div class="border-l-4 border-green-500 pl-4 py-2">
                   <p class="text-sm text-gray-600">ROE (自己資本利益率)</p>
-                  <p class="text-2xl font-bold">\${fund.roe?.toFixed(2) || 'N/A'}%</p>
-                  <p class="text-xs text-gray-500 mt-1">\${!fund.roe ? '-' : fund.roe > 15 ? '優良' : fund.roe > 10 ? '良好' : '低い'}</p>
+                  <p class="text-2xl font-bold">${fund.roe?.toFixed(2) || 'N/A'}%</p>
+                  <p class="text-xs text-gray-500 mt-1">${!fund.roe ? '-' : fund.roe > 15 ? '優良' : fund.roe > 10 ? '良好' : '低い'}</p>
                 </div>
                 <div class="border-l-4 border-yellow-500 pl-4 py-2">
                   <p class="text-sm text-gray-600">PBR (株価純資産倍率)</p>
-                  <p class="text-2xl font-bold">\${fund.pb_ratio?.toFixed(2) || 'N/A'}</p>
-                  <p class="text-xs text-gray-500 mt-1">\${!fund.pb_ratio ? '-' : fund.pb_ratio < 1 ? '割安' : fund.pb_ratio < 3 ? '適正' : '割高'}</p>
+                  <p class="text-2xl font-bold">${fund.pb_ratio?.toFixed(2) || 'N/A'}</p>
+                  <p class="text-xs text-gray-500 mt-1">${!fund.pb_ratio ? '-' : fund.pb_ratio < 1 ? '割安' : fund.pb_ratio < 3 ? '適正' : '割高'}</p>
                 </div>
                 <div class="border-l-4 border-purple-500 pl-4 py-2">
                   <p class="text-sm text-gray-600">配当利回り</p>
-                  <p class="text-2xl font-bold">\${fund.dividend_yield ? (fund.dividend_yield * 100).toFixed(2) + '%' : 'N/A'}</p>
-                  <p class="text-xs text-gray-500 mt-1">\${!fund.dividend_yield ? '-' : fund.dividend_yield > 0.03 ? '高配当' : '低配当'}</p>
+                  <p class="text-2xl font-bold">${fund.dividend_yield ? (fund.dividend_yield * 100).toFixed(2) + '%' : 'N/A'}</p>
+                  <p class="text-xs text-gray-500 mt-1">${!fund.dividend_yield ? '-' : fund.dividend_yield > 0.03 ? '高配当' : '低配当'}</p>
                 </div>
               </div>
             </div>
@@ -1210,23 +673,70 @@ app.get('/', (c) => {
               </div>
             </div>
           </div>
-        \`
+        `
       } else if (dimension === 'sentiment') {
         const sent = data.analysis.sentiment
-        content = \`
+        
+        // クリティカルアラートHTML
+        const criticalAlertsHtml = sent.critical_alerts && sent.critical_alerts.length > 0 ? `
+          <div class="bg-red-50 border-4 border-red-500 rounded-lg p-6 mb-6" style="animation: pulse 2s infinite;">
+            <h3 class="text-2xl font-bold text-red-800 mb-4">
+              <i class="fas fa-exclamation-triangle mr-2"></i>
+              クリティカルネガティブアラート（${sent.critical_alerts.length}件）
+            </h3>
+            <p class="text-sm text-red-700 mb-4">
+              <i class="fas fa-info-circle mr-1"></i>
+              センチメント≤-0.5 AND 影響度≥70点の重大なネガティブニュース
+            </p>
+            <div class="space-y-3">
+              ${sent.critical_alerts.map(alert => `
+                <div class="bg-white border-2 border-red-400 rounded-lg p-4">
+                  <div class="flex justify-between items-start mb-2">
+                    <div class="flex-1">
+                      <h4 class="font-bold text-lg text-red-900 mb-1">${alert.headline}</h4>
+                      <div class="flex gap-4 text-sm text-gray-600 mb-2">
+                        <span><i class="fas fa-newspaper mr-1"></i>${alert.source}</span>
+                        <span><i class="far fa-calendar mr-1"></i>${alert.date_formatted}</span>
+                        ${alert.url ? `<a href="${alert.url}" target="_blank" class="text-blue-600 hover:underline"><i class="fas fa-external-link-alt mr-1"></i>記事を読む</a>` : ''}
+                      </div>
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-3 gap-3">
+                    <div class="bg-red-100 p-2 rounded text-center">
+                      <p class="text-xs text-gray-600">センチメント</p>
+                      <p class="text-2xl font-bold text-red-700">${alert.sentiment_score.toFixed(2)}</p>
+                    </div>
+                    <div class="bg-orange-100 p-2 rounded text-center">
+                      <p class="text-xs text-gray-600">影響度スコア</p>
+                      <p class="text-2xl font-bold text-orange-700">${alert.impact_score}点</p>
+                    </div>
+                    <div class="bg-yellow-100 p-2 rounded text-center">
+                      <p class="text-xs text-gray-600">関連性</p>
+                      <p class="text-2xl font-bold text-yellow-700">${(alert.relevance_score * 100).toFixed(0)}%</p>
+                    </div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''
+        
+        content = `
           <div class="bg-gradient-to-r from-yellow-500 to-yellow-600 text-white p-6">
             <div class="flex justify-between items-center">
-              <h2 class="text-3xl font-bold"><i class="fas fa-newspaper mr-3"></i>センチメント分析詳細</h2>
+              <h2 class="text-3xl font-bold"><i class="fas fa-newspaper mr-3"></i>センチメント分析詳細 v12.0</h2>
               <button onclick="closeModal()" class="text-white hover:text-gray-200 text-3xl">&times;</button>
             </div>
-            <p class="mt-2 text-yellow-100">最新ニュースをGPT-5で分析</p>
+            <p class="mt-2 text-yellow-100">40件取得・影響度スコアリング・20件表示（影響度順）</p>
           </div>
           <div class="p-6">
+            ${criticalAlertsHtml}
+            
             <div class="grid grid-cols-2 gap-6 mb-6">
               <div class="bg-yellow-50 p-4 rounded-lg">
                 <h3 class="font-bold text-lg mb-3 text-yellow-800"><i class="fas fa-star mr-2"></i>センチメントスコア</h3>
                 <div class="text-center">
-                  <p class="text-5xl font-bold text-yellow-600">\${sent.score}</p>
+                  <p class="text-5xl font-bold text-yellow-600">${sent.score}</p>
                   <p class="text-gray-600 mt-2">/ 100点</p>
                 </div>
               </div>
@@ -1234,7 +744,7 @@ app.get('/', (c) => {
                 <h3 class="font-bold text-lg mb-3"><i class="fas fa-calculator mr-2"></i>加重スコア</h3>
                 <p class="text-sm text-gray-600 mb-2">重み: 15%</p>
                 <div class="text-center">
-                  <p class="text-5xl font-bold text-gray-700">\${(sent.score * 0.15).toFixed(1)}</p>
+                  <p class="text-5xl font-bold text-gray-700">${(sent.score * 0.15).toFixed(1)}</p>
                   <p class="text-gray-600 mt-2">総合スコアへの寄与</p>
                 </div>
               </div>
@@ -1245,72 +755,86 @@ app.get('/', (c) => {
               <div class="grid grid-cols-3 gap-4 mb-4">
                 <div class="bg-green-50 border-l-4 border-green-500 p-3 rounded">
                   <p class="text-sm text-gray-600">ポジティブ</p>
-                  <p class="text-3xl font-bold text-green-600">\${sent.positive_count || 0}</p>
+                  <p class="text-3xl font-bold text-green-600">${sent.positive_count || 0}</p>
                 </div>
                 <div class="bg-gray-50 border-l-4 border-gray-500 p-3 rounded">
                   <p class="text-sm text-gray-600">中立</p>
-                  <p class="text-3xl font-bold text-gray-600">\${sent.neutral_count || 0}</p>
+                  <p class="text-3xl font-bold text-gray-600">${sent.neutral_count || 0}</p>
                 </div>
                 <div class="bg-red-50 border-l-4 border-red-500 p-3 rounded">
                   <p class="text-sm text-gray-600">ネガティブ</p>
-                  <p class="text-3xl font-bold text-red-600">\${sent.negative_count || 0}</p>
+                  <p class="text-3xl font-bold text-red-600">${sent.negative_count || 0}</p>
                 </div>
               </div>
               <div class="bg-blue-50 p-3 rounded">
                 <p class="text-sm text-gray-600">分析ニュース総数</p>
-                <p class="text-2xl font-bold text-blue-600">\${sent.news_count || 0}件</p>
+                <p class="text-2xl font-bold text-blue-600">${sent.news_count || 0}件</p>
               </div>
             </div>
 
-            <!-- ニュース判断例 -->
+            <!-- ニュース一覧（影響度順） -->
             <div class="bg-white border border-gray-200 rounded-lg p-4 mb-6">
-              <h3 class="font-bold text-lg mb-3"><i class="fas fa-list mr-2"></i>ニュース判断例 (直近5件)</h3>
-              \${sent.news_examples && sent.news_examples.length > 0 ? \`
+              <h3 class="font-bold text-lg mb-3"><i class="fas fa-list mr-2"></i>ニュース一覧（影響度順 上位20件）</h3>
+              ${sent.news_examples && sent.news_examples.length > 0 ? `
                 <div class="space-y-3">
-                  \${sent.news_examples.map(example => \`
-                    <div class="border-l-4 \${example.sentiment === 'positive' ? 'border-green-500 bg-green-50' : example.sentiment === 'negative' ? 'border-red-500 bg-red-50' : 'border-gray-500 bg-gray-50'} p-3 rounded">
+                  ${sent.news_examples.map((example, index) => `
+                    <div class="border-l-4 ${example.sentiment === 'positive' ? 'border-green-500 bg-green-50' : example.sentiment === 'negative' ? 'border-red-500 bg-red-50' : 'border-gray-500 bg-gray-50'} p-3 rounded">
                       <div class="flex items-center justify-between mb-2">
-                        <div class="flex items-center">
-                          <span class="text-xs font-bold px-2 py-1 rounded \${example.sentiment === 'positive' ? 'bg-green-500 text-white' : example.sentiment === 'negative' ? 'bg-red-500 text-white' : 'bg-gray-500 text-white'}">
-                            \${example.sentiment === 'positive' ? 'ポジティブ' : example.sentiment === 'negative' ? 'ネガティブ' : '中立'}
+                        <div class="flex items-center gap-2">
+                          <span class="bg-blue-500 text-white text-xs font-bold px-2 py-1 rounded">#${index + 1}</span>
+                          <span class="text-xs font-bold px-2 py-1 rounded ${example.sentiment === 'positive' ? 'bg-green-500 text-white' : example.sentiment === 'negative' ? 'bg-red-500 text-white' : 'bg-gray-500 text-white'}">
+                            ${example.sentiment === 'positive' ? 'ポジティブ' : example.sentiment === 'negative' ? 'ネガティブ' : '中立'}
                           </span>
-                          <span class="text-xs text-gray-500 ml-2">[\${example.source}]</span>
+                          <span class="text-xs text-gray-500">[${example.source}]</span>
                         </div>
-                        <span class="text-xs text-blue-600 font-bold"><i class="far fa-calendar mr-1"></i>\${example.date_formatted}</span>
+                        <div class="flex items-center gap-3">
+                          ${example.impact_score ? `<span class="text-xs font-bold text-orange-600"><i class="fas fa-star mr-1"></i>影響度: ${example.impact_score}点</span>` : ''}
+                          <span class="text-xs text-blue-600 font-bold"><i class="far fa-calendar mr-1"></i>${example.date_formatted}</span>
+                        </div>
                       </div>
-                      <p class="font-bold text-sm mb-1">\${example.headline}</p>
-                      <p class="text-xs text-gray-600">\${example.summary}</p>
+                      <p class="font-bold text-sm mb-1">${example.headline}</p>
+                      <p class="text-xs text-gray-600 mb-2">${example.summary}</p>
+                      ${example.url ? `<a href="${example.url}" target="_blank" class="text-blue-600 hover:underline text-xs"><i class="fas fa-external-link-alt mr-1"></i>記事を読む</a>` : ''}
                     </div>
-                  \`).join('')}
+                  `).join('')}
                 </div>
-              \` : \`
+              ` : `
                 <p class="text-sm text-gray-500">ニュース判断例がありません</p>
-              \`}
+              `}
             </div>
 
-            <div class="bg-yellow-50 p-4 rounded-lg mb-6">
-              <h3 class="font-bold text-lg mb-3"><i class="fas fa-robot mr-2"></i>GPT-5分析</h3>
-              <p class="text-sm text-gray-700 mb-2">最新20件のニュース記事をAIが自動分析し、市場センチメントを評価しています。</p>
-              <ul class="space-y-1 text-sm text-gray-700">
-                <li>✓ ニュース見出しと概要を自然言語処理</li>
-                <li>✓ ポジティブ/ネガティブ/中立を分類</li>
-                <li>✓ 記事の信頼性と影響度を考慮</li>
-                <li>✓ 総合的なセンチメントスコアを算出</li>
-              </ul>
+            <div class="bg-purple-50 border-2 border-purple-300 rounded-lg p-4 mb-6">
+              <h3 class="font-bold text-lg mb-3 text-purple-800"><i class="fas fa-robot mr-2"></i>GPT-5 詳細分析</h3>
+              ${sent.gpt_insight ? `
+                <pre class="text-sm text-gray-700 whitespace-pre-wrap bg-white p-3 rounded border mb-2">${sent.gpt_insight}</pre>
+                <p class="text-xs text-gray-500">
+                  <i class="fas fa-info-circle mr-1"></i>
+                  ネガティブ上位2件 + ポジティブ上位2件をAIが深掘り分析（コスト最適化版）
+                </p>
+              ` : `
+                <p class="text-sm text-gray-700">最新40件のニュース記事を分析し、影響度スコアリングを実施</p>
+                <ul class="space-y-1 text-sm text-gray-700 mt-2">
+                  <li>✓ ニュース見出しと概要を自然言語処理</li>
+                  <li>✓ ポジティブ/ネガティブ/中立を分類</li>
+                  <li>✓ 影響度スコアリング（センチメント60% + 新しさ20% + 信頼性20%）</li>
+                  <li>✓ クリティカルアラート検出（センチメント≤-0.5 AND 影響度≥70点）</li>
+                </ul>
+              `}
             </div>
 
             <div class="bg-gray-50 p-4 rounded-lg mb-6">
-              <h3 class="font-bold text-lg mb-3"><i class="fas fa-calculator mr-2"></i>スコア計算式</h3>
-              <div class="bg-white p-3 rounded border text-center text-sm font-mono">
-                Score = 50 + (Positive × 10) - (Negative × 10) + (総記事数 × 1)
+              <h3 class="font-bold text-lg mb-3"><i class="fas fa-info-circle mr-2"></i>分析情報</h3>
+              <div class="space-y-2 text-sm text-gray-700">
+                <p><strong>信頼度:</strong> ${sent.confidence || 75}%</p>
+                <p><strong>影響度スコアリング:</strong> センチメント強度60% + 新しさ20% + ソース信頼性20%</p>
+                <p><strong>表示:</strong> 影響度順に上位20件（取得40件）</p>
               </div>
-              <p class="text-xs text-gray-600 mt-2 text-center">※ 最小0、最大100に正規化</p>
             </div>
           </div>
-        \`
+        `
       } else if (dimension === 'macro') {
         const macro = data.analysis.macro
-        content = \`
+        content = `
           <div class="bg-gradient-to-r from-purple-600 to-purple-700 text-white p-6">
             <div class="flex justify-between items-center">
               <h2 class="text-3xl font-bold"><i class="fas fa-globe mr-3"></i>マクロ経済分析詳細</h2>
@@ -1323,7 +847,7 @@ app.get('/', (c) => {
               <div class="bg-purple-50 p-4 rounded-lg">
                 <h3 class="font-bold text-lg mb-3 text-purple-800"><i class="fas fa-star mr-2"></i>マクロ経済スコア</h3>
                 <div class="text-center">
-                  <p class="text-5xl font-bold text-purple-600">\${macro.score}</p>
+                  <p class="text-5xl font-bold text-purple-600">${macro.score}</p>
                   <p class="text-gray-600 mt-2">/ 100点</p>
                 </div>
               </div>
@@ -1331,7 +855,7 @@ app.get('/', (c) => {
                 <h3 class="font-bold text-lg mb-3"><i class="fas fa-calculator mr-2"></i>加重スコア</h3>
                 <p class="text-sm text-gray-600 mb-2">重み: 10%</p>
                 <div class="text-center">
-                  <p class="text-5xl font-bold text-gray-700">\${(macro.score * 0.10).toFixed(1)}</p>
+                  <p class="text-5xl font-bold text-gray-700">${(macro.score * 0.10).toFixed(1)}</p>
                   <p class="text-gray-600 mt-2">総合スコアへの寄与</p>
                 </div>
               </div>
@@ -1342,23 +866,23 @@ app.get('/', (c) => {
               <div class="grid grid-cols-2 gap-4">
                 <div class="border-l-4 border-blue-500 pl-4 py-2">
                   <p class="text-sm text-gray-600">GDP成長率</p>
-                  <p class="text-2xl font-bold">\${macro.gdp_growth?.toFixed(2) || 'N/A'}%</p>
-                  <p class="text-xs text-gray-500 mt-1">\${!macro.gdp_growth ? '-' : macro.gdp_growth > 3 ? '強い経済' : macro.gdp_growth > 2 ? '健全' : '鈍化'}</p>
+                  <p class="text-2xl font-bold">${macro.gdp_growth?.toFixed(2) || 'N/A'}%</p>
+                  <p class="text-xs text-gray-500 mt-1">${!macro.gdp_growth ? '-' : macro.gdp_growth > 3 ? '強い経済' : macro.gdp_growth > 2 ? '健全' : '鈍化'}</p>
                 </div>
                 <div class="border-l-4 border-green-500 pl-4 py-2">
                   <p class="text-sm text-gray-600">失業率</p>
-                  <p class="text-2xl font-bold">\${macro.unemployment?.toFixed(2) || 'N/A'}%</p>
-                  <p class="text-xs text-gray-500 mt-1">\${!macro.unemployment ? '-' : macro.unemployment < 4 ? '完全雇用' : macro.unemployment < 6 ? '正常' : '高い'}</p>
+                  <p class="text-2xl font-bold">${macro.unemployment?.toFixed(2) || 'N/A'}%</p>
+                  <p class="text-xs text-gray-500 mt-1">${!macro.unemployment ? '-' : macro.unemployment < 4 ? '完全雇用' : macro.unemployment < 6 ? '正常' : '高い'}</p>
                 </div>
                 <div class="border-l-4 border-yellow-500 pl-4 py-2">
                   <p class="text-sm text-gray-600">インフレ率 (CPI)</p>
-                  <p class="text-2xl font-bold">\${macro.inflation?.toFixed(2) || 'N/A'}%</p>
-                  <p class="text-xs text-gray-500 mt-1">\${!macro.inflation ? '-' : macro.inflation < 2 ? '低インフレ' : macro.inflation < 4 ? '適正' : '高インフレ'}</p>
+                  <p class="text-2xl font-bold">${macro.inflation?.toFixed(2) || 'N/A'}%</p>
+                  <p class="text-xs text-gray-500 mt-1">${!macro.inflation ? '-' : macro.inflation < 2 ? '低インフレ' : macro.inflation < 4 ? '適正' : '高インフレ'}</p>
                 </div>
                 <div class="border-l-4 border-purple-500 pl-4 py-2">
                   <p class="text-sm text-gray-600">政策金利 (FF Rate)</p>
-                  <p class="text-2xl font-bold">\${macro.interest_rate?.toFixed(2) || 'N/A'}%</p>
-                  <p class="text-xs text-gray-500 mt-1">\${!macro.interest_rate ? '-' : macro.interest_rate < 2 ? '低金利' : macro.interest_rate < 4 ? '中金利' : '高金利'}</p>
+                  <p class="text-2xl font-bold">${macro.interest_rate?.toFixed(2) || 'N/A'}%</p>
+                  <p class="text-xs text-gray-500 mt-1">${!macro.interest_rate ? '-' : macro.interest_rate < 2 ? '低金利' : macro.interest_rate < 4 ? '中金利' : '高金利'}</p>
                 </div>
               </div>
             </div>
@@ -1383,10 +907,10 @@ app.get('/', (c) => {
               </div>
             </div>
           </div>
-        \`
+        `
       } else if (dimension === 'analyst') {
         const analyst = data.analysis.analyst
-        content = \`
+        content = `
           <div class="bg-gradient-to-r from-red-600 to-red-700 text-white p-6">
             <div class="flex justify-between items-center">
               <h2 class="text-3xl font-bold"><i class="fas fa-user-tie mr-3"></i>アナリスト評価詳細</h2>
@@ -1399,7 +923,7 @@ app.get('/', (c) => {
               <div class="bg-red-50 p-4 rounded-lg">
                 <h3 class="font-bold text-lg mb-3 text-red-800"><i class="fas fa-star mr-2"></i>アナリストスコア</h3>
                 <div class="text-center">
-                  <p class="text-5xl font-bold text-red-600">\${analyst.score}</p>
+                  <p class="text-5xl font-bold text-red-600">${analyst.score}</p>
                   <p class="text-gray-600 mt-2">/ 100点</p>
                 </div>
               </div>
@@ -1407,7 +931,7 @@ app.get('/', (c) => {
                 <h3 class="font-bold text-lg mb-3"><i class="fas fa-calculator mr-2"></i>加重スコア</h3>
                 <p class="text-sm text-gray-600 mb-2">重み: 10%</p>
                 <div class="text-center">
-                  <p class="text-5xl font-bold text-gray-700">\${(analyst.score * 0.10).toFixed(1)}</p>
+                  <p class="text-5xl font-bold text-gray-700">${(analyst.score * 0.10).toFixed(1)}</p>
                   <p class="text-gray-600 mt-2">総合スコアへの寄与</p>
                 </div>
               </div>
@@ -1418,25 +942,25 @@ app.get('/', (c) => {
               <div class="grid grid-cols-2 gap-4 mb-4">
                 <div class="bg-gradient-to-br from-green-50 to-green-100 border-l-4 border-green-500 p-4 rounded-lg">
                   <p class="text-sm text-gray-600 mb-1">コンセンサス</p>
-                  <p class="text-4xl font-bold \${analyst.consensus === 'BUY' ? 'text-green-600' : analyst.consensus === 'SELL' ? 'text-red-600' : 'text-gray-600'}">
-                    \${analyst.consensus || 'N/A'}
+                  <p class="text-4xl font-bold ${analyst.consensus === 'BUY' ? 'text-green-600' : analyst.consensus === 'SELL' ? 'text-red-600' : 'text-gray-600'}">
+                    ${analyst.consensus || 'N/A'}
                   </p>
                 </div>
                 <div class="bg-gradient-to-br from-blue-50 to-blue-100 border-l-4 border-blue-500 p-4 rounded-lg">
                   <p class="text-sm text-gray-600 mb-1">アナリスト数</p>
-                  <p class="text-4xl font-bold text-blue-600">\${analyst.recommendation_count || 0}</p>
+                  <p class="text-4xl font-bold text-blue-600">${analyst.recommendation_count || 0}</p>
                   <p class="text-xs text-gray-500 mt-1">人のアナリストが評価</p>
                 </div>
               </div>
               <div class="grid grid-cols-2 gap-4">
                 <div class="bg-blue-50 p-3 rounded">
                   <p class="text-sm text-gray-600">目標株価</p>
-                  <p class="text-2xl font-bold text-blue-600">\${analyst.target_price ? '$' + analyst.target_price.toFixed(2) : 'N/A'}</p>
+                  <p class="text-2xl font-bold text-blue-600">${analyst.target_price ? '$' + analyst.target_price.toFixed(2) : 'N/A'}</p>
                 </div>
                 <div class="bg-purple-50 p-3 rounded">
                   <p class="text-sm text-gray-600">上昇余地</p>
-                  <p class="text-2xl font-bold \${analyst.upside && analyst.upside > 0 ? 'text-green-600' : 'text-red-600'}">
-                    \${analyst.upside ? analyst.upside.toFixed(1) + '%' : 'N/A'}
+                  <p class="text-2xl font-bold ${analyst.upside && analyst.upside > 0 ? 'text-green-600' : 'text-red-600'}">
+                    ${analyst.upside ? analyst.upside.toFixed(1) + '%' : 'N/A'}
                   </p>
                 </div>
               </div>
@@ -1473,7 +997,7 @@ app.get('/', (c) => {
               </div>
             </div>
           </div>
-        \`
+        `
       }
       
       console.log('Setting modal content for dimension:', dimension)
@@ -1538,10 +1062,10 @@ app.get('/', (c) => {
         loadingMessage = '分析中... モデル学習 + GPT-5分析を実行しています（約3-5分）'
       }
       
-      loadingDiv.innerHTML = \`
+      loadingDiv.innerHTML = `
         <div class="loader"></div>
-        <p class="text-center text-gray-600">\${loadingMessage}</p>
-      \`
+        <p class="text-center text-gray-600">${loadingMessage}</p>
+      `
 
       document.getElementById('analysis-loading').style.display = 'block'
       document.getElementById('analysis-result').style.display = 'none'
@@ -1621,62 +1145,62 @@ app.get('/', (c) => {
         // safeDataを使用してレンダリング
         const displayData = safeData;
 
-        const resultHTML = \`
+        const resultHTML = `
           <div class="bg-white rounded-lg shadow-md p-6 mb-6">
             <div class="flex justify-between items-center mb-6">
               <div>
-                <h2 class="text-3xl font-bold">\${symbol}</h2>
-                <p class="text-2xl text-gray-600 mt-2">$\${data.current_price.toFixed(2)}</p>
+                <h2 class="text-3xl font-bold">${symbol}</h2>
+                <p class="text-2xl text-gray-600 mt-2">$${data.current_price.toFixed(2)}</p>
               </div>
               <div class="text-right">
-                <div class="text-5xl font-bold \${data.prediction.action === 'BUY' ? 'text-green-600' : data.prediction.action === 'SELL' ? 'text-red-600' : 'text-gray-600'}">
-                  \${data.prediction.action}
+                <div class="text-5xl font-bold ${data.prediction.action === 'BUY' ? 'text-green-600' : data.prediction.action === 'SELL' ? 'text-red-600' : 'text-gray-600'}">
+                  ${data.prediction.action}
                 </div>
                 <p class="text-lg text-gray-600 mt-2">
-                  信頼度: \${data.prediction.confidence}%
+                  信頼度: ${data.prediction.confidence}%
                   <i class="fas fa-info-circle ml-1 text-blue-500 cursor-pointer" 
                      title="信頼度は判定の確実性を示します。スコアと一致度が高いほど信頼度が上がります。" 
-                     onclick="alert('【信頼度とは】\\n\\n判定の確実性を示す指標です。\\n\\n【スコアと信頼度の関係】\\n• 75点以上: 信頼度75-100% (強いBUY)\\n• 60-75点: 信頼度60-75% (中程度のBUY)\\n• 40-60点: 信頼度40-60% (HOLD/様子見)\\n• 40点未満: 信頼度60-100% (SELL)\\n\\n【重要な注意点】\\n総合スコアが高くても信頼度が低い場合は、\\n各分析次元の結果にばらつきがあります。\\n例: テクニカル85点でもファンダメンタル40点など\\n\\n信頼度が低い場合は慎重に判断してください。')"></i>
+                     onclick="alert('【信頼度とは】\n\n判定の確実性を示す指標です。\n\n【スコアと信頼度の関係】\n• 75点以上: 信頼度75-100% (強いBUY)\n• 60-75点: 信頼度60-75% (中程度のBUY)\n• 40-60点: 信頼度40-60% (HOLD/様子見)\n• 40点未満: 信頼度60-100% (SELL)\n\n【重要な注意点】\n総合スコアが高くても信頼度が低い場合は、\n各分析次元の結果にばらつきがあります。\n例: テクニカル85点でもファンダメンタル40点など\n\n信頼度が低い場合は慎重に判断してください。')"></i>
                 </p>
               </div>
             </div>
 
             <div class="mb-6">
               <div class="flex items-center justify-between mb-3">
-                <h3 class="text-xl font-bold">総合スコア: \${data.prediction.score}/100</h3>
+                <h3 class="text-xl font-bold">総合スコア: ${data.prediction.score}/100</h3>
                 <i class="fas fa-info-circle text-blue-500 cursor-pointer" 
                    title="5つの分析を重み付け平均したスコア" 
-                   onclick="alert('【総合スコアとは】\\n\\n5次元分析の加重平均値です：\\n\\n• テクニカル: 35%\\n• ファンダメンタル: 30%\\n• センチメント: 15%\\n• マクロ経済: 10%\\n• アナリスト: 10%\\n\\n【判定基準】\\n• 75点以上: BUY（買い推奨）\\n• 60-75点: HOLD（保持推奨）\\n• 60点未満: SELL（売り推奨）')"></i>
+                   onclick="alert('【総合スコアとは】\n\n5次元分析の加重平均値です：\n\n• テクニカル: 35%\n• ファンダメンタル: 30%\n• センチメント: 15%\n• マクロ経済: 10%\n• アナリスト: 10%\n\n【判定基準】\n• 75点以上: BUY（買い推奨）\n• 60-75点: HOLD（保持推奨）\n• 60点未満: SELL（売り推奨）')"></i>
               </div>
               <div class="bg-gray-200 rounded-full h-6">
-                <div class="score-bar bg-gradient-to-r from-blue-500 to-purple-600" style="width: \${data.prediction.score}%"></div>
+                <div class="score-bar bg-gradient-to-r from-blue-500 to-purple-600" style="width: ${data.prediction.score}%"></div>
               </div>
             </div>
 
             <div class="grid grid-cols-5 gap-4 mb-6">
               <div id="card-technical" class="score-card text-center cursor-pointer hover:shadow-lg transition">
                 <p class="text-sm text-gray-600 mb-1"><i class="fas fa-chart-line mr-1"></i>テクニカル</p>
-                <p class="text-2xl font-bold text-blue-600">\${data.prediction.breakdown.technical}</p>
+                <p class="text-2xl font-bold text-blue-600">${data.prediction.breakdown.technical}</p>
                 <p class="text-xs text-gray-500 mt-1">クリックして詳細表示</p>
               </div>
               <div id="card-fundamental" class="score-card text-center cursor-pointer hover:shadow-lg transition">
                 <p class="text-sm text-gray-600 mb-1"><i class="fas fa-building mr-1"></i>ファンダメンタル</p>
-                <p class="text-2xl font-bold text-green-600">\${data.prediction.breakdown.fundamental}</p>
+                <p class="text-2xl font-bold text-green-600">${data.prediction.breakdown.fundamental}</p>
                 <p class="text-xs text-gray-500 mt-1">クリックして詳細表示</p>
               </div>
               <div id="card-sentiment" class="score-card text-center cursor-pointer hover:shadow-lg transition">
                 <p class="text-sm text-gray-600 mb-1"><i class="fas fa-newspaper mr-1"></i>センチメント</p>
-                <p class="text-2xl font-bold text-yellow-600">\${data.prediction.breakdown.sentiment}</p>
+                <p class="text-2xl font-bold text-yellow-600">${data.prediction.breakdown.sentiment}</p>
                 <p class="text-xs text-gray-500 mt-1">クリックして詳細表示</p>
               </div>
               <div id="card-macro" class="score-card text-center cursor-pointer hover:shadow-lg transition">
                 <p class="text-sm text-gray-600 mb-1"><i class="fas fa-globe mr-1"></i>マクロ経済</p>
-                <p class="text-2xl font-bold text-purple-600">\${data.prediction.breakdown.macro}</p>
+                <p class="text-2xl font-bold text-purple-600">${data.prediction.breakdown.macro}</p>
                 <p class="text-xs text-gray-500 mt-1">クリックして詳細表示</p>
               </div>
               <div id="card-analyst" class="score-card text-center cursor-pointer hover:shadow-lg transition">
                 <p class="text-sm text-gray-600 mb-1"><i class="fas fa-user-tie mr-1"></i>アナリスト</p>
-                <p class="text-2xl font-bold text-red-600">\${data.prediction.breakdown.analyst}</p>
+                <p class="text-2xl font-bold text-red-600">${data.prediction.breakdown.analyst}</p>
                 <p class="text-xs text-gray-500 mt-1">クリックして詳細表示</p>
               </div>
             </div>
@@ -1687,7 +1211,7 @@ app.get('/', (c) => {
             </div>
 
             <!-- ML予測比較セクション -->
-            \${data.prediction.ml_prediction ? \`
+            ${data.prediction.ml_prediction ? `
             <div class="bg-gradient-to-r from-green-50 to-blue-50 p-6 rounded-lg mb-6 border-2 border-green-200">
               <h4 class="font-bold text-xl mb-4 text-center">
                 <i class="fas fa-robot mr-2"></i>デュアル予測システム: 統計 vs 機械学習
@@ -1706,18 +1230,18 @@ app.get('/', (c) => {
                   <div class="space-y-3">
                     <div>
                       <p class="text-sm text-gray-600">判定</p>
-                      <p class="text-3xl font-bold \${data.prediction.action === 'BUY' ? 'text-green-600' : data.prediction.action === 'SELL' ? 'text-red-600' : 'text-gray-600'}">
-                        \${data.prediction.action}
+                      <p class="text-3xl font-bold ${data.prediction.action === 'BUY' ? 'text-green-600' : data.prediction.action === 'SELL' ? 'text-red-600' : 'text-gray-600'}">
+                        ${data.prediction.action}
                       </p>
                     </div>
                     
                     <div>
                       <p class="text-sm text-gray-600">信頼度</p>
                       <div class="flex items-center">
-                        <p class="text-2xl font-bold text-blue-600">\${data.prediction.confidence}%</p>
+                        <p class="text-2xl font-bold text-blue-600">${data.prediction.confidence}%</p>
                         <div class="ml-3 flex-1">
                           <div class="w-full bg-gray-200 rounded-full h-2">
-                            <div class="bg-blue-600 h-2 rounded-full" style="width: \${data.prediction.confidence}%"></div>
+                            <div class="bg-blue-600 h-2 rounded-full" style="width: ${data.prediction.confidence}%"></div>
                           </div>
                         </div>
                       </div>
@@ -1725,7 +1249,7 @@ app.get('/', (c) => {
                     
                     <div>
                       <p class="text-sm text-gray-600">総合スコア</p>
-                      <p class="text-2xl font-bold text-blue-700">\${data.prediction.score}/100</p>
+                      <p class="text-2xl font-bold text-blue-700">${data.prediction.score}/100</p>
                     </div>
                     
                     <div class="pt-3 border-t">
@@ -1750,20 +1274,20 @@ app.get('/', (c) => {
                     <div>
                       <p class="text-sm text-gray-600">予測価格</p>
                       <p class="text-3xl font-bold text-green-600">
-                        $\${data.prediction.ml_prediction.predicted_price.toFixed(2)}
+                        $${(data.prediction.ml_prediction?.predicted_price || 0).toFixed(2)}
                       </p>
-                      <p class="text-sm \${data.prediction.ml_prediction.change_percent > 0 ? 'text-green-600' : 'text-red-600'}">
-                        \${data.prediction.ml_prediction.change_percent > 0 ? '+' : ''}\${data.prediction.ml_prediction.change_percent.toFixed(2)}%
+                      <p class="text-sm ${data.prediction.ml_prediction.change_percent > 0 ? 'text-green-600' : 'text-red-600'}">
+                        ${data.prediction.ml_prediction.change_percent > 0 ? '+' : ''}${(data.prediction.ml_prediction?.change_percent || 0).toFixed(2)}%
                       </p>
                     </div>
                     
                     <div>
                       <p class="text-sm text-gray-600">ML信頼度</p>
                       <div class="flex items-center">
-                        <p class="text-2xl font-bold text-green-600">\${Math.round(data.prediction.ml_prediction.confidence * 100)}%</p>
+                        <p class="text-2xl font-bold text-green-600">${Math.round(data.prediction.ml_prediction.confidence * 100)}%</p>
                         <div class="ml-3 flex-1">
                           <div class="w-full bg-gray-200 rounded-full h-2">
-                            <div class="bg-green-600 h-2 rounded-full" style="width: \${data.prediction.ml_prediction.confidence * 100}%"></div>
+                            <div class="bg-green-600 h-2 rounded-full" style="width: ${data.prediction.ml_prediction.confidence * 100}%"></div>
                           </div>
                         </div>
                       </div>
@@ -1771,13 +1295,13 @@ app.get('/', (c) => {
                     
                     <div>
                       <p class="text-sm text-gray-600">使用特徴量</p>
-                      <p class="text-2xl font-bold text-green-700">\${data.prediction.ml_prediction.features_used}個</p>
+                      <p class="text-2xl font-bold text-green-700">${data.prediction.ml_prediction.features_used}個</p>
                     </div>
                     
                     <div class="pt-3 border-t">
                       <p class="text-xs text-gray-500">
                         <i class="fas fa-microchip mr-1"></i>
-                        \${data.prediction.ml_prediction.model}
+                        ${data.prediction.ml_prediction.model}
                       </p>
                     </div>
                   </div>
@@ -1821,19 +1345,19 @@ app.get('/', (c) => {
                     <h6 class="font-bold text-sm text-blue-700 mb-3">
                       <i class="fas fa-chart-line mr-1"></i>統計予測の精度
                     </h6>
-                    \${data.prediction.backfit ? \`
+                    ${data.prediction.backfit ? `
                     <div class="space-y-2 text-sm">
                       <div class="flex justify-between items-center">
                         <span class="text-gray-600">RMSE:</span>
-                        <span class="font-bold text-blue-600">\${data.prediction.backfit.accuracy.rmse.toFixed(2)}</span>
+                        <span class="font-bold text-blue-600">${data.prediction.backfit.accuracy.rmse.toFixed(2)}</span>
                       </div>
                       <div class="flex justify-between items-center">
                         <span class="text-gray-600">MAE:</span>
-                        <span class="font-bold text-blue-600">\${data.prediction.backfit.accuracy.mae.toFixed(2)}</span>
+                        <span class="font-bold text-blue-600">${data.prediction.backfit.accuracy.mae.toFixed(2)}</span>
                       </div>
                       <div class="flex justify-between items-center">
                         <span class="text-gray-600">方向性正解率:</span>
-                        <span class="font-bold text-blue-600">\${data.prediction.backfit.accuracy.directionAccuracy.toFixed(1)}%</span>
+                        <span class="font-bold text-blue-600">${data.prediction.backfit.accuracy.directionAccuracy.toFixed(1)}%</span>
                       </div>
                       <div class="pt-2 border-t mt-2">
                         <p class="text-xs text-gray-500">
@@ -1842,7 +1366,7 @@ app.get('/', (c) => {
                         </p>
                       </div>
                     </div>
-                    \` : '<p class="text-xs text-gray-500">精度データなし</p>'}
+                    ` : '<p class="text-xs text-gray-500">精度データなし</p>'}
                   </div>
                   
                   <!-- ML予測の動作状態 -->
@@ -1859,12 +1383,12 @@ app.get('/', (c) => {
                       </div>
                       <div class="flex justify-between items-center">
                         <span class="text-gray-600">モデル:</span>
-                        <span class="font-bold text-green-600">\${data.prediction.ml_prediction.model}</span>
+                        <span class="font-bold text-green-600">${data.prediction.ml_prediction.model}</span>
                       </div>
                       <div class="flex justify-between items-center">
                         <span class="text-gray-600">予測時刻:</span>
                         <span class="font-bold text-green-600 text-xs">
-                          \${new Date(data.prediction.ml_prediction.timestamp).toLocaleString('ja-JP')}
+                          ${new Date(data.prediction.ml_prediction.timestamp).toLocaleString('ja-JP')}
                         </span>
                       </div>
                       <div class="pt-2 border-t mt-2">
@@ -1886,49 +1410,49 @@ app.get('/', (c) => {
                     <div>
                       <div class="flex justify-between items-center mb-1">
                         <span class="text-xs text-gray-600">現在価格</span>
-                        <span class="text-sm font-bold text-gray-800">$\${data.current_price.toFixed(2)}</span>
+                        <span class="text-sm font-bold text-gray-800">$${data.current_price.toFixed(2)}</span>
                       </div>
                       <div class="flex justify-between items-center mb-1">
                         <span class="text-xs text-gray-600">統計予測（傾向）</span>
-                        <span class="text-sm font-bold \${data.prediction.action === 'BUY' ? 'text-green-600' : data.prediction.action === 'SELL' ? 'text-red-600' : 'text-gray-600'}">
-                          \${data.prediction.action} (\${data.prediction.confidence}%)
+                        <span class="text-sm font-bold ${data.prediction.action === 'BUY' ? 'text-green-600' : data.prediction.action === 'SELL' ? 'text-red-600' : 'text-gray-600'}">
+                          ${data.prediction.action} (${data.prediction.confidence}%)
                         </span>
                       </div>
                       <div class="flex justify-between items-center">
                         <span class="text-xs text-gray-600">ML予測価格</span>
                         <span class="text-sm font-bold text-green-600">
-                          $\${data.prediction.ml_prediction.predicted_price.toFixed(2)} 
-                          <span class="\${data.prediction.ml_prediction.change_percent > 0 ? 'text-green-600' : 'text-red-600'}">
-                            (\${data.prediction.ml_prediction.change_percent > 0 ? '+' : ''}\${data.prediction.ml_prediction.change_percent.toFixed(2)}%)
+                          $${(data.prediction.ml_prediction?.predicted_price || 0).toFixed(2)} 
+                          <span class="${data.prediction.ml_prediction.change_percent > 0 ? 'text-green-600' : 'text-red-600'}">
+                            (${data.prediction.ml_prediction.change_percent > 0 ? '+' : ''}${(data.prediction.ml_prediction?.change_percent || 0).toFixed(2)}%)
                           </span>
                         </span>
                       </div>
                     </div>
                     
                     <div class="pt-3 border-t">
-                      \${(() => {
+                      ${(() => {
                         const mlDirection = data.prediction.ml_prediction.change_percent > 0 ? 'BUY' : data.prediction.ml_prediction.change_percent < 0 ? 'SELL' : 'HOLD';
                         const isMatch = (data.prediction.action === mlDirection) || 
                                        (data.prediction.action === 'HOLD' && Math.abs(data.prediction.ml_prediction.change_percent) < 1) ||
                                        (mlDirection === 'HOLD' && data.prediction.action === 'HOLD');
-                        return \`
+                        return `
                           <div class="flex items-center justify-between">
                             <span class="text-sm font-bold text-gray-700">予測一致度:</span>
                             <div class="flex items-center">
-                              <span class="px-3 py-1 rounded-full text-xs font-bold \${isMatch ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}">
-                                <i class="fas fa-\${isMatch ? 'check' : 'exclamation-triangle'} mr-1"></i>
-                                \${isMatch ? '一致' : '不一致'}
+                              <span class="px-3 py-1 rounded-full text-xs font-bold ${isMatch ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}">
+                                <i class="fas fa-${isMatch ? 'check' : 'exclamation-triangle'} mr-1"></i>
+                                ${isMatch ? '一致' : '不一致'}
                               </span>
                               <i class="fas fa-info-circle ml-2 text-gray-400 cursor-pointer" 
                                  title="両予測が同じ方向（上昇/下降）を示している場合は一致と判定"></i>
                             </div>
                           </div>
                           <p class="text-xs text-gray-600 mt-2">
-                            \${isMatch 
+                            ${isMatch 
                               ? '✓ 統計予測とML予測が同じ方向性を示しています。信頼度が高い予測です。' 
                               : '[WARN] 統計予測とML予測で方向性が異なります。慎重な判断を推奨します。'}
                           </p>
-                        \`;
+                        `;
                       })()}
                     </div>
                   </div>
@@ -1957,7 +1481,7 @@ app.get('/', (c) => {
                         </div>
                         <div class="flex justify-between items-center">
                           <span class="text-gray-600">使用特徴量:</span>
-                          <span class="font-bold text-indigo-600">\${data.prediction.ml_prediction.features_used}個</span>
+                          <span class="font-bold text-indigo-600">${data.prediction.ml_prediction.features_used}個</span>
                         </div>
                         <div class="flex justify-between items-center">
                           <span class="text-gray-600">予測対象:</span>
@@ -2046,11 +1570,11 @@ app.get('/', (c) => {
                     <h6 class="font-bold text-sm text-indigo-700 mb-3">
                       <i class="fas fa-chart-bar mr-1"></i>特徴量重要度（Top 10）
                     </h6>
-                    \${data.prediction.ml_prediction.feature_importances ? \`
+                    ${data.prediction.ml_prediction.feature_importances ? `
                       <div class="mb-3">
                         <canvas id="featureImportanceChart" style="max-height: 250px;"></canvas>
                       </div>
-                    \` : \`
+                    ` : `
                       <div class="space-y-2">
                         <div>
                           <div class="flex justify-between items-center mb-1">
@@ -2098,11 +1622,11 @@ app.get('/', (c) => {
                           </div>
                         </div>
                       </div>
-                    \`}
+                    `}
                     <div class="mt-3 pt-3 border-t">
                       <p class="text-xs text-gray-500">
                         <i class="fas fa-info-circle mr-1"></i>
-                        \${data.prediction.ml_prediction.feature_importances ? 
+                        ${data.prediction.ml_prediction.feature_importances ? 
                           'ML APIから取得した実際の特徴量重要度' : 
                           '現在価格と移動平均が予測に最も影響（推定値）'}
                       </p>
@@ -2110,7 +1634,7 @@ app.get('/', (c) => {
                   </div>
                   
                   <!-- MLモデル性能指標 -->
-                  \${data.prediction.ml_prediction.model_metrics ? \`
+                  ${data.prediction.ml_prediction.model_metrics ? `
                   <div class="mt-4 bg-white p-4 rounded-lg shadow">
                     <h6 class="font-bold text-sm text-indigo-700 mb-3">
                       <i class="fas fa-chart-line mr-1"></i>モデル性能指標
@@ -2118,36 +1642,36 @@ app.get('/', (c) => {
                     <div class="grid grid-cols-2 gap-3">
                       <div class="bg-blue-50 p-3 rounded-lg text-center">
                         <p class="text-xs text-gray-600 mb-1">MAE (平均絶対誤差)</p>
-                        <p class="text-xl font-bold text-blue-600">\${data.prediction.ml_prediction.model_metrics.mae.toFixed(2)}</p>
+                        <p class="text-xl font-bold text-blue-600">${(data.prediction.ml_prediction.model_metrics?.mae || 0).toFixed(2)}</p>
                         <p class="text-xs text-gray-500 mt-1">低いほど高精度</p>
                       </div>
                       <div class="bg-green-50 p-3 rounded-lg text-center">
                         <p class="text-xs text-gray-600 mb-1">RMSE (平均二乗誤差)</p>
-                        <p class="text-xl font-bold text-green-600">\${data.prediction.ml_prediction.model_metrics.rmse.toFixed(2)}</p>
+                        <p class="text-xl font-bold text-green-600">${(data.prediction.ml_prediction.model_metrics?.rmse || 0).toFixed(2)}</p>
                         <p class="text-xs text-gray-500 mt-1">低いほど高精度</p>
                       </div>
                       <div class="bg-purple-50 p-3 rounded-lg text-center">
                         <p class="text-xs text-gray-600 mb-1">R² スコア</p>
-                        <p class="text-xl font-bold text-purple-600">\${data.prediction.ml_prediction.model_metrics.r2_score.toFixed(3)}</p>
+                        <p class="text-xl font-bold text-purple-600">${(data.prediction.ml_prediction.model_metrics?.r2_score || 0).toFixed(3)}</p>
                         <p class="text-xs text-gray-500 mt-1">1に近いほど高精度</p>
                       </div>
                       <div class="bg-orange-50 p-3 rounded-lg text-center">
                         <p class="text-xs text-gray-600 mb-1">学習サンプル数</p>
-                        <p class="text-xl font-bold text-orange-600">\${data.prediction.ml_prediction.model_metrics.training_samples.toLocaleString()}</p>
+                        <p class="text-xl font-bold text-orange-600">${data.prediction.ml_prediction.model_metrics.training_samples.toLocaleString()}</p>
                         <p class="text-xs text-gray-500 mt-1">データ</p>
                       </div>
                     </div>
                     <div class="mt-3 pt-3 border-t">
                       <p class="text-xs text-gray-500">
                         <i class="fas fa-database mr-1"></i>
-                        学習データ: \${data.prediction.ml_prediction.training_info?.training_days || 'N/A'}日分のデータで学習
+                        学習データ: ${data.prediction.ml_prediction.training_info?.training_days || 'N/A'}日分のデータで学習
                       </p>
                     </div>
                   </div>
-                  \` : ''}
+                  ` : ''}
                   
                   <!-- ML学習データ詳細 -->
-                  \${data.prediction.ml_prediction.training_info ? \`
+                  ${data.prediction.ml_prediction.training_info ? `
                   <div class="mt-4 bg-gradient-to-r from-cyan-50 to-blue-50 p-4 rounded-lg border border-cyan-200">
                     <h6 class="font-bold text-sm text-cyan-700 mb-3">
                       <i class="fas fa-database mr-1"></i>学習データ詳細
@@ -2155,29 +1679,29 @@ app.get('/', (c) => {
                     <div class="grid grid-cols-2 gap-3 text-xs">
                       <div class="bg-white p-3 rounded-lg">
                         <p class="text-gray-600 mb-1">データ開始日</p>
-                        <p class="font-bold text-cyan-700">\${data.prediction.ml_prediction.training_info.data_start_date}</p>
+                        <p class="font-bold text-cyan-700">${data.prediction.ml_prediction.training_info.data_start_date}</p>
                       </div>
                       <div class="bg-white p-3 rounded-lg">
                         <p class="text-gray-600 mb-1">データ終了日</p>
-                        <p class="font-bold text-cyan-700">\${data.prediction.ml_prediction.training_info.data_end_date}</p>
+                        <p class="font-bold text-cyan-700">${data.prediction.ml_prediction.training_info.data_end_date}</p>
                       </div>
                       <div class="bg-white p-3 rounded-lg">
                         <p class="text-gray-600 mb-1">学習期間</p>
-                        <p class="font-bold text-cyan-700">\${data.prediction.ml_prediction.training_info.training_days}日</p>
+                        <p class="font-bold text-cyan-700">${data.prediction.ml_prediction.training_info.training_days}日</p>
                       </div>
                       <div class="bg-white p-3 rounded-lg">
                         <p class="text-gray-600 mb-1">最終学習日</p>
-                        <p class="font-bold text-cyan-700">\${data.prediction.ml_prediction.training_info.last_trained}</p>
+                        <p class="font-bold text-cyan-700">${data.prediction.ml_prediction.training_info.last_trained}</p>
                       </div>
                     </div>
                     <div class="mt-3 pt-3 border-t border-cyan-200">
                       <p class="text-xs text-gray-600">
                         <i class="fas fa-info-circle mr-1"></i>
-                        学習データは\${symbol}の過去\${data.prediction.ml_prediction.training_info.training_days}日分の株価データを使用し、LightGBMモデルで学習されています
+                        学習データは${symbol}の過去${data.prediction.ml_prediction.training_info.training_days}日分の株価データを使用し、LightGBMモデルで学習されています
                       </p>
                     </div>
                   </div>
-                  \` : ''}
+                  ` : ''}
                   
                   <!-- 予測比較チャート -->
                   <div class="mt-4 bg-white p-4 rounded-lg shadow">
@@ -2224,17 +1748,17 @@ app.get('/', (c) => {
                 </div>
               </div>
             </div>
-            \` : ''}
+            ` : ''}
 
             <!-- オンデマンド学習結果（学習が実行された場合のみ表示） -->
-            \${data.prediction.ml_training ? \`
+            ${data.prediction.ml_training ? `
             <div class="bg-gradient-to-r from-purple-50 to-pink-50 p-6 rounded-lg mb-6 border-2 border-purple-300">
               <div class="bg-gradient-to-r from-purple-600 to-pink-600 text-white p-4 rounded-lg mb-4">
                 <h4 class="font-bold text-2xl text-center">
                   <i class="fas fa-graduation-cap mr-2"></i>オンデマンド学習結果
                 </h4>
                 <p class="text-center text-purple-100 mt-2">
-                  \${data.symbol}専用MLモデルを学習しました
+                  ${data.symbol}専用MLモデルを学習しました
                 </p>
               </div>
 
@@ -2242,26 +1766,26 @@ app.get('/', (c) => {
               <div class="grid grid-cols-4 gap-4 mb-6">
                 <div class="bg-white p-4 rounded-lg shadow">
                   <p class="text-xs text-gray-600 mb-1">モデルID</p>
-                  <p class="text-sm font-bold text-purple-700 truncate" title="\${data.prediction.ml_training.model_id}">
-                    \${data.prediction.ml_training.model_id}
+                  <p class="text-sm font-bold text-purple-700 truncate" title="${data.prediction.ml_training.model_id}">
+                    ${data.prediction.ml_training.model_id}
                   </p>
                 </div>
                 <div class="bg-white p-4 rounded-lg shadow">
                   <p class="text-xs text-gray-600 mb-1">学習時間</p>
                   <p class="text-2xl font-bold text-purple-700">
-                    \${data.prediction.ml_training.training_duration.toFixed(1)}秒
+                    ${(data.prediction.ml_training?.training_duration || 0).toFixed(1)}秒
                   </p>
                 </div>
                 <div class="bg-white p-4 rounded-lg shadow">
                   <p class="text-xs text-gray-600 mb-1">学習サンプル数</p>
                   <p class="text-2xl font-bold text-purple-700">
-                    \${data.prediction.ml_training.training_data.train_samples}
+                    ${data.prediction.ml_training.accuracy_metrics?.training_samples}
                   </p>
                 </div>
                 <div class="bg-white p-4 rounded-lg shadow">
                   <p class="text-xs text-gray-600 mb-1">テストサンプル数</p>
                   <p class="text-2xl font-bold text-purple-700">
-                    \${data.prediction.ml_training.training_data.test_samples}
+                    ${data.prediction.ml_training.accuracy_metrics?.validation_samples}
                   </p>
                 </div>
               </div>
@@ -2275,21 +1799,21 @@ app.get('/', (c) => {
                   <div class="space-y-2">
                     <div class="flex justify-between">
                       <span class="text-gray-600">総サンプル数:</span>
-                      <span class="font-bold">\${data.prediction.ml_training.training_data.total_samples}</span>
+                      <span class="font-bold">${(data.prediction.ml_training.accuracy_metrics?.training_samples || 0) + (data.prediction.ml_training.accuracy_metrics?.validation_samples || 0)}</span>
                     </div>
                     <div class="flex justify-between">
                       <span class="text-gray-600">学習セット:</span>
-                      <span class="font-bold text-blue-600">\${data.prediction.ml_training.training_data.train_samples}</span>
+                      <span class="font-bold text-blue-600">${data.prediction.ml_training.accuracy_metrics?.training_samples}</span>
                     </div>
                     <div class="flex justify-between">
                       <span class="text-gray-600">テストセット:</span>
-                      <span class="font-bold text-green-600">\${data.prediction.ml_training.training_data.test_samples}</span>
+                      <span class="font-bold text-green-600">${data.prediction.ml_training.accuracy_metrics?.validation_samples}</span>
                     </div>
                   </div>
                   <div class="space-y-2">
                     <div class="flex justify-between">
                       <span class="text-gray-600">特徴量数:</span>
-                      <span class="font-bold">\${data.prediction.ml_training.training_data.features_count}</span>
+                      <span class="font-bold">8</span>
                     </div>
                     <div class="flex justify-between">
                       <span class="text-gray-600">分割比率:</span>
@@ -2297,67 +1821,10 @@ app.get('/', (c) => {
                     </div>
                     <div class="flex justify-between">
                       <span class="text-gray-600">学習時刻:</span>
-                      <span class="font-bold text-xs">\${new Date(data.prediction.ml_training.timestamp).toLocaleString('ja-JP', {timeZone: 'Asia/Tokyo'})}</span>
+                      <span class="font-bold text-xs">${new Date().toLocaleString('ja-JP', {timeZone: 'Asia/Tokyo'})}</span>
                     </div>
                   </div>
                 </div>
-              </div>
-
-              <!-- ハイパーパラメータ -->
-              <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
-                <h5 class="font-bold text-lg text-gray-800 mb-4">
-                  <i class="fas fa-cog mr-2"></i>ハイパーパラメータ
-                </h5>
-                <div class="grid grid-cols-3 gap-4">
-                  <div class="bg-gray-50 p-3 rounded">
-                    <p class="text-xs text-gray-600 mb-1">目的関数</p>
-                    <p class="font-bold text-gray-800">\${data.prediction.ml_training.hyperparameters.objective}</p>
-                  </div>
-                  <div class="bg-gray-50 p-3 rounded">
-                    <p class="text-xs text-gray-600 mb-1">ブースティング</p>
-                    <p class="font-bold text-gray-800">\${data.prediction.ml_training.hyperparameters.boosting_type}</p>
-                  </div>
-                  <div class="bg-gray-50 p-3 rounded">
-                    <p class="text-xs text-gray-600 mb-1">葉数</p>
-                    <p class="font-bold text-gray-800">\${data.prediction.ml_training.hyperparameters.num_leaves}</p>
-                  </div>
-                  <div class="bg-gray-50 p-3 rounded">
-                    <p class="text-xs text-gray-600 mb-1">学習率</p>
-                    <p class="font-bold text-gray-800">\${data.prediction.ml_training.hyperparameters.learning_rate}</p>
-                  </div>
-                  <div class="bg-gray-50 p-3 rounded">
-                    <p class="text-xs text-gray-600 mb-1">最大深度</p>
-                    <p class="font-bold text-gray-800">\${data.prediction.ml_training.hyperparameters.max_depth}</p>
-                  </div>
-                  <div class="bg-gray-50 p-3 rounded">
-                    <p class="text-xs text-gray-600 mb-1">最小葉データ数</p>
-                    <p class="font-bold text-gray-800">\${data.prediction.ml_training.hyperparameters.min_data_in_leaf}</p>
-                  </div>
-                  <div class="bg-gray-50 p-3 rounded">
-                    <p class="text-xs text-gray-600 mb-1">特徴量選択率</p>
-                    <p class="font-bold text-gray-800">\${data.prediction.ml_training.hyperparameters.feature_fraction}</p>
-                  </div>
-                  <div class="bg-gray-50 p-3 rounded">
-                    <p class="text-xs text-gray-600 mb-1">バギング率</p>
-                    <p class="font-bold text-gray-800">\${data.prediction.ml_training.hyperparameters.bagging_fraction}</p>
-                  </div>
-                  <div class="bg-gray-50 p-3 rounded">
-                    <p class="text-xs text-gray-600 mb-1">ラウンド数</p>
-                    <p class="font-bold text-gray-800">\${data.prediction.ml_training.hyperparameters.num_boost_round}</p>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 学習曲線 -->
-              <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
-                <h5 class="font-bold text-lg text-gray-800 mb-4">
-                  <i class="fas fa-chart-line mr-2"></i>学習曲線（Train/Validation Loss）
-                </h5>
-                <canvas id="learningCurveChart" style="max-height: 300px;"></canvas>
-                <p class="text-xs text-gray-600 mt-3 text-center">
-                  <i class="fas fa-info-circle mr-1"></i>
-                  青線: 学習セット損失 | 赤線: 検証セット損失 | 損失が低いほど高精度
-                </p>
               </div>
 
               <!-- 性能指標 (accuracy_metricsを使用) -->
@@ -2370,19 +1837,19 @@ app.get('/', (c) => {
                   <!-- RMSE -->
                   <div class="text-center bg-blue-50 p-4 rounded">
                     <p class="text-sm text-gray-600 mb-2">RMSE（二乗平均平方根誤差）</p>
-                    <p class="text-2xl font-bold text-blue-600">\${data.prediction.ml_training.accuracy_metrics.rmse.toFixed(2)}</p>
+                    <p class="text-2xl font-bold text-blue-600">${(data.prediction.ml_training.accuracy_metrics?.rmse || 0).toFixed(2)}</p>
                   </div>
 
                   <!-- MAE -->
                   <div class="text-center bg-green-50 p-4 rounded">
                     <p class="text-sm text-gray-600 mb-2">MAE（平均絶対誤差）</p>
-                    <p class="text-2xl font-bold text-green-600">\${data.prediction.ml_training.accuracy_metrics.mae.toFixed(2)}</p>
+                    <p class="text-2xl font-bold text-green-600">${(data.prediction.ml_training.accuracy_metrics?.mae || 0).toFixed(2)}</p>
                   </div>
 
                   <!-- R² Score -->
                   <div class="text-center bg-purple-50 p-4 rounded">
                     <p class="text-sm text-gray-600 mb-2">R²スコア（決定係数）</p>
-                    <p class="text-2xl font-bold text-purple-600">\${data.prediction.ml_training.accuracy_metrics.r2_score.toFixed(4)}</p>
+                    <p class="text-2xl font-bold text-purple-600">${(data.prediction.ml_training.accuracy_metrics?.r2_score || 0).toFixed(4)}</p>
                   </div>
                 </div>
 
@@ -2392,8 +1859,8 @@ app.get('/', (c) => {
                     <i class="fas fa-database mr-1"></i>学習データ情報
                   </p>
                   <p class="text-lg text-gray-600">
-                    訓練サンプル数: <span class="font-bold">\${data.prediction.ml_training.accuracy_metrics.training_samples}</span> / 
-                    検証サンプル数: <span class="font-bold">\${data.prediction.ml_training.accuracy_metrics.validation_samples}</span>
+                    訓練サンプル数: <span class="font-bold">${data.prediction.ml_training.accuracy_metrics.training_samples}</span> / 
+                    検証サンプル数: <span class="font-bold">${data.prediction.ml_training.accuracy_metrics.validation_samples}</span>
                   </p>
                 </div>
               </div>
@@ -2411,7 +1878,7 @@ app.get('/', (c) => {
               </div>
 
               <!-- ML版株価チャート（過去30日 + 未来30日予測） -->
-              \${data.prediction.ml_training.future_predictions ? \`
+              ${data.prediction.ml_training.future_predictions ? `
               <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
                 <h5 class="font-bold text-lg text-gray-800 mb-4">
                   <i class="fas fa-chart-area mr-2"></i>ML版株価予測（過去30日 + 未来30日）
@@ -2427,17 +1894,17 @@ app.get('/', (c) => {
                   <div class="bg-blue-50 p-3 rounded text-center">
                     <p class="text-xs text-gray-600 mb-1">30日後予測価格</p>
                     <p class="text-xl font-bold text-blue-600">
-                      $\${data.prediction.ml_training.future_predictions.predictions[data.prediction.ml_training.future_predictions.predictions.length - 1].toFixed(2)}
+                      $${data.prediction.ml_training.future_predictions.predictions[data.prediction.ml_training.future_predictions.predictions.length - 1].toFixed(2)}
                     </p>
                   </div>
                   <div class="bg-green-50 p-3 rounded text-center">
                     <p class="text-xs text-gray-600 mb-1">予測変化率</p>
-                    <p class="text-xl font-bold \${(() => {
+                    <p class="text-xl font-bold ${(() => {
                       const lastPred = data.prediction.ml_training.future_predictions.predictions[data.prediction.ml_training.future_predictions.predictions.length - 1];
                       const changePercent = ((lastPred - data.current_price) / data.current_price * 100);
                       return changePercent >= 0 ? 'text-green-600' : 'text-red-600';
                     })()}">
-                      \${(() => {
+                      ${(() => {
                         const lastPred = data.prediction.ml_training.future_predictions.predictions[data.prediction.ml_training.future_predictions.predictions.length - 1];
                         const changePercent = ((lastPred - data.current_price) / data.current_price * 100);
                         return (changePercent >= 0 ? '+' : '') + changePercent.toFixed(2);
@@ -2447,15 +1914,15 @@ app.get('/', (c) => {
                   <div class="bg-purple-50 p-3 rounded text-center">
                     <p class="text-xs text-gray-600 mb-1">予測最高値</p>
                     <p class="text-xl font-bold text-purple-600">
-                      $\${Math.max(...data.prediction.ml_training.future_predictions.predictions).toFixed(2)}
+                      $${Math.max(...data.prediction.ml_training.future_predictions.predictions).toFixed(2)}
                     </p>
                   </div>
                 </div>
               </div>
-              \` : ''}
+              ` : ''}
 
               <!-- ML版バックフィットチャート（過去30日の予測精度検証） -->
-              \${data.prediction.ml_training.backfit_predictions ? \`
+              ${data.prediction.ml_training.backfit_predictions ? `
               <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
                 <h5 class="font-bold text-lg text-gray-800 mb-4">
                   <i class="fas fa-chart-line mr-2"></i>ML予測精度検証（過去30日バックフィット）
@@ -2471,19 +1938,19 @@ app.get('/', (c) => {
                   <div class="bg-blue-50 p-3 rounded text-center">
                     <p class="text-xs text-gray-600 mb-1">RMSE（誤差）</p>
                     <p class="text-xl font-bold text-blue-600">
-                      \${(data.prediction.ml_training.backfit_predictions.rmse || 0).toFixed(2)}
+                      ${(data.prediction.ml_training.backfit_predictions.rmse || 0).toFixed(2)}
                     </p>
                   </div>
                   <div class="bg-green-50 p-3 rounded text-center">
                     <p class="text-xs text-gray-600 mb-1">MAE（平均誤差）</p>
                     <p class="text-xl font-bold text-green-600">
-                      \${(data.prediction.ml_training.backfit_predictions.mae || 0).toFixed(2)}
+                      ${(data.prediction.ml_training.backfit_predictions.mae || 0).toFixed(2)}
                     </p>
                   </div>
                   <div class="bg-purple-50 p-3 rounded text-center">
                     <p class="text-xs text-gray-600 mb-1">方向性正解率</p>
                     <p class="text-xl font-bold text-purple-600">
-                      \${(data.prediction.ml_training.backfit_predictions.direction_accuracy || 0).toFixed(1)}%
+                      ${(data.prediction.ml_training.backfit_predictions.direction_accuracy || 0).toFixed(1)}%
                     </p>
                   </div>
                 </div>
@@ -2494,19 +1961,19 @@ app.get('/', (c) => {
                   </p>
                 </div>
               </div>
-              \` : ''}
+              ` : ''}
 
               <!-- 学習成功メッセージ -->
               <div class="mt-6 bg-green-50 border-2 border-green-300 p-4 rounded-lg text-center">
                 <p class="text-lg font-bold text-green-700">
-                  <i class="fas fa-check-circle mr-2"></i>\${data.prediction.ml_training.message}
+                  <i class="fas fa-check-circle mr-2"></i>${data.prediction.ml_training.message}
                 </p>
                 <p class="text-sm text-gray-600 mt-2">
                   学習されたモデルは7日間キャッシュされ、今後の予測に使用されます
                 </p>
               </div>
             </div>
-            \` : ''}
+            ` : ''}
 
             <!-- 信頼度基準ガイド -->
             <div class="bg-gradient-to-r from-gray-50 to-blue-50 p-6 rounded-lg mb-6">
@@ -2529,9 +1996,9 @@ app.get('/', (c) => {
                 </div>
               </div>
               <div class="bg-indigo-50 p-4 rounded-lg">
-                <p class="text-sm font-bold mb-2">現在の信頼度: <span class="text-2xl \${data.prediction.confidence >= 70 ? 'text-green-600' : data.prediction.confidence >= 50 ? 'text-yellow-600' : 'text-red-600'}">\${data.prediction.confidence}%</span></p>
+                <p class="text-sm font-bold mb-2">現在の信頼度: <span class="text-2xl ${data.prediction.confidence >= 70 ? 'text-green-600' : data.prediction.confidence >= 50 ? 'text-yellow-600' : 'text-red-600'}">${data.prediction.confidence}%</span></p>
                 <p class="text-sm text-gray-700">
-                  \${data.prediction.confidence >= 70 ? '[OK] この銘柄は高信頼度で投資推奨されます' : 
+                  ${data.prediction.confidence >= 70 ? '[OK] この銘柄は高信頼度で投資推奨されます' : 
                      data.prediction.confidence >= 50 ? '[WARN] この銘柄は慎重な判断が必要です' : 
                      '[ERROR] この銘柄は現時点で投資を見送ることを推奨します'}
                 </p>
@@ -2664,21 +2131,21 @@ app.get('/', (c) => {
               <div class="grid grid-cols-3 gap-4 mb-4">
                 <div class="bg-white p-4 rounded-lg shadow">
                   <p class="text-sm text-gray-600 mb-2"><i class="fas fa-calendar-check mr-1"></i>推奨購入日</p>
-                  <p class="text-xl font-bold text-green-600">\${data.prediction.future.buyDate}</p>
-                  <p class="text-sm text-gray-500 mt-1">$\${data.prediction.future.buyPrice.toFixed(2)}</p>
+                  <p class="text-xl font-bold text-green-600">${data.prediction.future.buyDate}</p>
+                  <p class="text-sm text-gray-500 mt-1">$${data.prediction.future.buyPrice.toFixed(2)}</p>
                 </div>
                 <div class="bg-white p-4 rounded-lg shadow">
                   <p class="text-sm text-gray-600 mb-2"><i class="fas fa-calendar-times mr-1"></i>推奨売却日 (最高値予測日)</p>
-                  <p class="text-xl font-bold text-red-600">\${data.prediction.future.sellDate}</p>
-                  <p class="text-sm text-gray-500 mt-1">$\${data.prediction.future.sellPrice.toFixed(2)}</p>
+                  <p class="text-xl font-bold text-red-600">${data.prediction.future.sellDate}</p>
+                  <p class="text-sm text-gray-500 mt-1">$${data.prediction.future.sellPrice.toFixed(2)}</p>
                 </div>
                 <div class="bg-white p-4 rounded-lg shadow">
                   <p class="text-sm text-gray-600 mb-2"><i class="fas fa-chart-line mr-1"></i>予想利益率</p>
-                  <p class="text-2xl font-bold \${data.prediction.future.profitPercent >= 0 ? 'text-green-600' : 'text-red-600'}">
-                    \${data.prediction.future.profitPercent >= 0 ? '+' : ''}\${data.prediction.future.profitPercent.toFixed(2)}%
+                  <p class="text-2xl font-bold ${data.prediction.future.profitPercent >= 0 ? 'text-green-600' : 'text-red-600'}">
+                    ${data.prediction.future.profitPercent >= 0 ? '+' : ''}${data.prediction.future.profitPercent.toFixed(2)}%
                   </p>
                   <p class="text-sm text-gray-500 mt-1">
-                    \${data.prediction.future.profitPercent >= 0 ? '利益見込み' : '損失リスク'}
+                    ${data.prediction.future.profitPercent >= 0 ? '利益見込み' : '損失リスク'}
                   </p>
                 </div>
               </div>
@@ -2690,38 +2157,38 @@ app.get('/', (c) => {
                   <div class="bg-indigo-50 p-3 rounded">
                     <p class="text-xs text-gray-600 mb-1">3日後売却</p>
                     <p class="text-lg font-bold text-indigo-600">
-                      \${(() => {
+                      ${(() => {
                         const idx = 3
                         const price = data.prediction.future.predictedPrices[idx]
                         const profit = ((price - data.prediction.future.buyPrice) / data.prediction.future.buyPrice * 100)
                         return (profit >= 0 ? '+' : '') + profit.toFixed(2) + '%'
                       })()}
                     </p>
-                    <p class="text-xs text-gray-500">\${data.prediction.future.dates[3]}</p>
+                    <p class="text-xs text-gray-500">${data.prediction.future.dates[3]}</p>
                   </div>
                   <div class="bg-indigo-50 p-3 rounded">
                     <p class="text-xs text-gray-600 mb-1">7日後売却</p>
                     <p class="text-lg font-bold text-indigo-600">
-                      \${(() => {
+                      ${(() => {
                         const idx = 7
                         const price = data.prediction.future.predictedPrices[idx]
                         const profit = ((price - data.prediction.future.buyPrice) / data.prediction.future.buyPrice * 100)
                         return (profit >= 0 ? '+' : '') + profit.toFixed(2) + '%'
                       })()}
                     </p>
-                    <p class="text-xs text-gray-500">\${data.prediction.future.dates[7]}</p>
+                    <p class="text-xs text-gray-500">${data.prediction.future.dates[7]}</p>
                   </div>
                   <div class="bg-indigo-50 p-3 rounded">
                     <p class="text-xs text-gray-600 mb-1">14日後売却</p>
                     <p class="text-lg font-bold text-indigo-600">
-                      \${(() => {
+                      ${(() => {
                         const idx = 14
                         const price = data.prediction.future.predictedPrices[idx]
                         const profit = ((price - data.prediction.future.buyPrice) / data.prediction.future.buyPrice * 100)
                         return (profit >= 0 ? '+' : '') + profit.toFixed(2) + '%'
                       })()}
                     </p>
-                    <p class="text-xs text-gray-500">\${data.prediction.future.dates[14]}</p>
+                    <p class="text-xs text-gray-500">${data.prediction.future.dates[14]}</p>
                   </div>
                 </div>
                 <p class="text-xs text-gray-600 mt-3 text-center">
@@ -2740,7 +2207,7 @@ app.get('/', (c) => {
             </div>
 
             <!-- ML版投資戦略推奨 (中長期) -->
-            \${data.prediction.ml_training && data.prediction.ml_training.future_predictions ? \`
+            ${data.prediction.ml_training && data.prediction.ml_training.future_predictions ? `
             <div class="bg-gradient-to-r from-green-50 to-teal-50 p-6 rounded-lg mb-6 border-2 border-green-300">
               <h4 class="font-bold text-xl mb-4 text-center">
                 <i class="fas fa-robot mr-2"></i>ML投資戦略推奨 (中長期)
@@ -2750,7 +2217,7 @@ app.get('/', (c) => {
                 LightGBMモデルによる機械学習ベースの投資戦略（未来30日予測）
               </p>
               
-              \${(() => {
+              ${(() => {
                 const predictions = data.prediction.ml_training.future_predictions.predictions
                 const dates = data.prediction.ml_training.future_predictions.dates
                 const buyPrice = data.current_price
@@ -2769,25 +2236,25 @@ app.get('/', (c) => {
                 const sellDate = dates[maxPriceIdx]
                 const profitPercent = ((sellPrice - buyPrice) / buyPrice * 100)
                 
-                return \`
+                return `
                 <div class="grid grid-cols-3 gap-4 mb-4">
                   <div class="bg-white p-4 rounded-lg shadow">
                     <p class="text-sm text-gray-600 mb-2"><i class="fas fa-calendar-check mr-1"></i>推奨購入日</p>
-                    <p class="text-xl font-bold text-green-600">\${buyDate}</p>
-                    <p class="text-sm text-gray-500 mt-1">$\${buyPrice.toFixed(2)}</p>
+                    <p class="text-xl font-bold text-green-600">${buyDate}</p>
+                    <p class="text-sm text-gray-500 mt-1">$${buyPrice.toFixed(2)}</p>
                   </div>
                   <div class="bg-white p-4 rounded-lg shadow">
                     <p class="text-sm text-gray-600 mb-2"><i class="fas fa-calendar-times mr-1"></i>推奨売却日 (ML予測最高値)</p>
-                    <p class="text-xl font-bold text-red-600">\${sellDate}</p>
-                    <p class="text-sm text-gray-500 mt-1">$\${sellPrice.toFixed(2)}</p>
+                    <p class="text-xl font-bold text-red-600">${sellDate}</p>
+                    <p class="text-sm text-gray-500 mt-1">$${sellPrice.toFixed(2)}</p>
                   </div>
                   <div class="bg-white p-4 rounded-lg shadow">
                     <p class="text-sm text-gray-600 mb-2"><i class="fas fa-chart-line mr-1"></i>ML予測利益率</p>
-                    <p class="text-2xl font-bold \${profitPercent >= 0 ? 'text-green-600' : 'text-red-600'}">
-                      \${profitPercent >= 0 ? '+' : ''}\${profitPercent.toFixed(2)}%
+                    <p class="text-2xl font-bold ${profitPercent >= 0 ? 'text-green-600' : 'text-red-600'}">
+                      ${profitPercent >= 0 ? '+' : ''}${profitPercent.toFixed(2)}%
                     </p>
                     <p class="text-sm text-gray-500 mt-1">
-                      \${profitPercent >= 0 ? '利益見込み' : '損失リスク'}
+                      ${profitPercent >= 0 ? '利益見込み' : '損失リスク'}
                     </p>
                   </div>
                 </div>
@@ -2799,49 +2266,49 @@ app.get('/', (c) => {
                     <div class="bg-teal-50 p-3 rounded">
                       <p class="text-xs text-gray-600 mb-1">3日後売却</p>
                       <p class="text-lg font-bold text-teal-600">
-                        \${(() => {
+                        ${(() => {
                           const idx = 3
                           const price = predictions[idx]
                           const profit = ((price - buyPrice) / buyPrice * 100)
                           return (profit >= 0 ? '+' : '') + profit.toFixed(2) + '%'
                         })()}
                       </p>
-                      <p class="text-xs text-gray-500">\${dates[3]}</p>
-                      <p class="text-xs text-gray-600 mt-1">予測価格: $\${predictions[3].toFixed(2)}</p>
+                      <p class="text-xs text-gray-500">${dates[3]}</p>
+                      <p class="text-xs text-gray-600 mt-1">予測価格: $${predictions[3].toFixed(2)}</p>
                     </div>
                     <div class="bg-teal-50 p-3 rounded">
                       <p class="text-xs text-gray-600 mb-1">7日後売却</p>
                       <p class="text-lg font-bold text-teal-600">
-                        \${(() => {
+                        ${(() => {
                           const idx = 7
                           const price = predictions[idx]
                           const profit = ((price - buyPrice) / buyPrice * 100)
                           return (profit >= 0 ? '+' : '') + profit.toFixed(2) + '%'
                         })()}
                       </p>
-                      <p class="text-xs text-gray-500">\${dates[7]}</p>
-                      <p class="text-xs text-gray-600 mt-1">予測価格: $\${predictions[7].toFixed(2)}</p>
+                      <p class="text-xs text-gray-500">${dates[7]}</p>
+                      <p class="text-xs text-gray-600 mt-1">予測価格: $${predictions[7].toFixed(2)}</p>
                     </div>
                     <div class="bg-teal-50 p-3 rounded">
                       <p class="text-xs text-gray-600 mb-1">14日後売却</p>
                       <p class="text-lg font-bold text-teal-600">
-                        \${(() => {
+                        ${(() => {
                           const idx = 14
                           const price = predictions[idx]
                           const profit = ((price - buyPrice) / buyPrice * 100)
                           return (profit >= 0 ? '+' : '') + profit.toFixed(2) + '%'
                         })()}
                       </p>
-                      <p class="text-xs text-gray-500">\${dates[14]}</p>
-                      <p class="text-xs text-gray-600 mt-1">予測価格: $\${predictions[14].toFixed(2)}</p>
+                      <p class="text-xs text-gray-500">${dates[14]}</p>
+                      <p class="text-xs text-gray-600 mt-1">予測価格: $${predictions[14].toFixed(2)}</p>
                     </div>
                   </div>
                   <p class="text-xs text-gray-600 mt-3 text-center">
                     <i class="fas fa-robot mr-1 text-teal-500"></i>
-                    MLモデルの学習パターンに基づく短期予測（方向性正解率: \${data.prediction.ml_training.backfit_predictions?.direction_accuracy ? data.prediction.ml_training.backfit_predictions.direction_accuracy.toFixed(1) + '%' : 'N/A'}）
+                    MLモデルの学習パターンに基づく短期予測（方向性正解率: ${data.prediction.ml_training.backfit_predictions?.direction_accuracy ? data.prediction.ml_training.backfit_predictions.direction_accuracy.toFixed(1) + '%' : 'N/A'}）
                   </p>
                 </div>
-                \`
+                `
               })()}
               
               <div class="bg-green-50 border-l-4 border-green-500 p-4 rounded">
@@ -2853,7 +2320,7 @@ app.get('/', (c) => {
                 </p>
               </div>
             </div>
-            \` : ''}
+            ` : ''}
 
             <!-- 予測精度指標 -->
             <div class="bg-gradient-to-r from-purple-50 to-indigo-50 p-6 rounded-lg mb-6">
@@ -2861,34 +2328,34 @@ app.get('/', (c) => {
               <div class="grid grid-cols-4 gap-4 mb-4">
                 <div class="bg-white p-4 rounded-lg shadow text-center">
                   <p class="text-sm text-gray-600 mb-2">RMSE (平均二乗誤差)</p>
-                  <p class="text-2xl font-bold text-purple-600">\${data.prediction.backfit.accuracy.rmse.toFixed(2)}</p>
+                  <p class="text-2xl font-bold text-purple-600">${data.prediction.backfit.accuracy.rmse.toFixed(2)}</p>
                   <p class="text-xs text-gray-500 mt-1">低いほど高精度</p>
-                  <p class="text-xs font-bold mt-2 \${data.prediction.backfit.accuracy.rmse < 3 ? 'text-green-600' : data.prediction.backfit.accuracy.rmse < 6 ? 'text-yellow-600' : 'text-red-600'}">
-                    \${data.prediction.backfit.accuracy.rmse < 3 ? '✓ 高精度' : data.prediction.backfit.accuracy.rmse < 6 ? '△ 中精度' : '✗ 低精度'}
+                  <p class="text-xs font-bold mt-2 ${data.prediction.backfit.accuracy.rmse < 3 ? 'text-green-600' : data.prediction.backfit.accuracy.rmse < 6 ? 'text-yellow-600' : 'text-red-600'}">
+                    ${data.prediction.backfit.accuracy.rmse < 3 ? '✓ 高精度' : data.prediction.backfit.accuracy.rmse < 6 ? '△ 中精度' : '✗ 低精度'}
                   </p>
                 </div>
                 <div class="bg-white p-4 rounded-lg shadow text-center">
                   <p class="text-sm text-gray-600 mb-2">MAE (平均絶対誤差)</p>
-                  <p class="text-2xl font-bold text-indigo-600">\${data.prediction.backfit.accuracy.mae.toFixed(2)}</p>
+                  <p class="text-2xl font-bold text-indigo-600">${data.prediction.backfit.accuracy.mae.toFixed(2)}</p>
                   <p class="text-xs text-gray-500 mt-1">低いほど高精度</p>
-                  <p class="text-xs font-bold mt-2 \${data.prediction.backfit.accuracy.mae < 2 ? 'text-green-600' : data.prediction.backfit.accuracy.mae < 4 ? 'text-yellow-600' : 'text-red-600'}">
-                    \${data.prediction.backfit.accuracy.mae < 2 ? '✓ 高精度' : data.prediction.backfit.accuracy.mae < 4 ? '△ 中精度' : '✗ 低精度'}
+                  <p class="text-xs font-bold mt-2 ${data.prediction.backfit.accuracy.mae < 2 ? 'text-green-600' : data.prediction.backfit.accuracy.mae < 4 ? 'text-yellow-600' : 'text-red-600'}">
+                    ${data.prediction.backfit.accuracy.mae < 2 ? '✓ 高精度' : data.prediction.backfit.accuracy.mae < 4 ? '△ 中精度' : '✗ 低精度'}
                   </p>
                 </div>
                 <div class="bg-white p-4 rounded-lg shadow text-center">
                   <p class="text-sm text-gray-600 mb-2">MAPE (平均誤差率)</p>
-                  <p class="text-2xl font-bold text-blue-600">\${data.prediction.backfit.accuracy.mape.toFixed(2)}%</p>
+                  <p class="text-2xl font-bold text-blue-600">${data.prediction.backfit.accuracy.mape.toFixed(2)}%</p>
                   <p class="text-xs text-gray-500 mt-1">低いほど高精度</p>
-                  <p class="text-xs font-bold mt-2 \${data.prediction.backfit.accuracy.mape < 3 ? 'text-green-600' : data.prediction.backfit.accuracy.mape < 6 ? 'text-yellow-600' : 'text-red-600'}">
-                    \${data.prediction.backfit.accuracy.mape < 3 ? '✓ 高精度' : data.prediction.backfit.accuracy.mape < 6 ? '△ 中精度' : '✗ 低精度'}
+                  <p class="text-xs font-bold mt-2 ${data.prediction.backfit.accuracy.mape < 3 ? 'text-green-600' : data.prediction.backfit.accuracy.mape < 6 ? 'text-yellow-600' : 'text-red-600'}">
+                    ${data.prediction.backfit.accuracy.mape < 3 ? '✓ 高精度' : data.prediction.backfit.accuracy.mape < 6 ? '△ 中精度' : '✗ 低精度'}
                   </p>
                 </div>
                 <div class="bg-white p-4 rounded-lg shadow text-center">
                   <p class="text-sm text-gray-600 mb-2">方向性的中率</p>
-                  <p class="text-2xl font-bold text-green-600">\${data.prediction.backfit.accuracy.directionAccuracy.toFixed(1)}%</p>
+                  <p class="text-2xl font-bold text-green-600">${data.prediction.backfit.accuracy.directionAccuracy.toFixed(1)}%</p>
                   <p class="text-xs text-gray-500 mt-1">上昇/下降の判定</p>
-                  <p class="text-xs font-bold mt-2 \${data.prediction.backfit.accuracy.directionAccuracy >= 60 ? 'text-green-600' : data.prediction.backfit.accuracy.directionAccuracy >= 50 ? 'text-yellow-600' : 'text-red-600'}">
-                    \${data.prediction.backfit.accuracy.directionAccuracy >= 60 ? '✓ 信頼可' : data.prediction.backfit.accuracy.directionAccuracy >= 50 ? '△ 慎重判断' : '✗ 信頼低'}
+                  <p class="text-xs font-bold mt-2 ${data.prediction.backfit.accuracy.directionAccuracy >= 60 ? 'text-green-600' : data.prediction.backfit.accuracy.directionAccuracy >= 50 ? 'text-yellow-600' : 'text-red-600'}">
+                    ${data.prediction.backfit.accuracy.directionAccuracy >= 60 ? '✓ 信頼可' : data.prediction.backfit.accuracy.directionAccuracy >= 50 ? '△ 慎重判断' : '✗ 信頼低'}
                   </p>
                 </div>
               </div>
@@ -2911,8 +2378,8 @@ app.get('/', (c) => {
                   </div>
                   <div class="border-l-4 border-blue-500 pl-3 py-2 bg-blue-50">
                     <p class="font-bold text-blue-700">総合判定</p>
-                    <p class="text-xs font-bold mt-1 \${data.prediction.backfit.accuracy.mape < 3 && data.prediction.backfit.accuracy.directionAccuracy >= 60 ? 'text-green-600' : data.prediction.backfit.accuracy.mape < 6 && data.prediction.backfit.accuracy.directionAccuracy >= 50 ? 'text-yellow-600' : 'text-red-600'}">
-                      \${data.prediction.backfit.accuracy.mape < 3 && data.prediction.backfit.accuracy.directionAccuracy >= 60 ? '✓ 投資判断推奨' : data.prediction.backfit.accuracy.mape < 6 && data.prediction.backfit.accuracy.directionAccuracy >= 50 ? '△ 慎重判断推奨' : '✗ 投資判断非推奨'}
+                    <p class="text-xs font-bold mt-1 ${data.prediction.backfit.accuracy.mape < 3 && data.prediction.backfit.accuracy.directionAccuracy >= 60 ? 'text-green-600' : data.prediction.backfit.accuracy.mape < 6 && data.prediction.backfit.accuracy.directionAccuracy >= 50 ? 'text-yellow-600' : 'text-red-600'}">
+                      ${data.prediction.backfit.accuracy.mape < 3 && data.prediction.backfit.accuracy.directionAccuracy >= 60 ? '✓ 投資判断推奨' : data.prediction.backfit.accuracy.mape < 6 && data.prediction.backfit.accuracy.directionAccuracy >= 50 ? '△ 慎重判断推奨' : '✗ 投資判断非推奨'}
                     </p>
                   </div>
                 </div>
@@ -2931,31 +2398,31 @@ app.get('/', (c) => {
               <div>
                 <h4 class="font-bold text-green-600 mb-2"><i class="fas fa-check-circle mr-2"></i>ポジティブ要因</h4>
                 <ul class="space-y-1">
-                  \${data.prediction.reasons.map(r => \`<li class="text-sm">\${r}</li>\`).join('')}
+                  ${data.prediction.reasons.map(r => `<li class="text-sm">${r}</li>`).join('')}
                 </ul>
               </div>
               <div>
                 <h4 class="font-bold text-red-600 mb-2"><i class="fas fa-exclamation-triangle mr-2"></i>リスク要因</h4>
                 <ul class="space-y-1">
-                  \${data.prediction.risks.map(r => \`<li class="text-sm">\${r}</li>\`).join('')}
+                  ${data.prediction.risks.map(r => `<li class="text-sm">${r}</li>`).join('')}
                 </ul>
               </div>
             </div>
 
-            \${data.prediction.target_price ? \`
+            ${data.prediction.target_price ? `
               <div class="bg-blue-50 p-4 rounded-lg mb-6">
                 <h4 class="font-bold mb-2">目標株価と期待リターン</h4>
-                <p class="text-lg">目標価格: <span class="font-bold text-blue-600">$\${data.prediction.target_price.toFixed(2)}</span></p>
-                <p class="text-lg">期待リターン: <span class="font-bold \${data.prediction.expected_return > 0 ? 'text-green-600' : 'text-red-600'}">\${data.prediction.expected_return?.toFixed(1)}%</span></p>
+                <p class="text-lg">目標価格: <span class="font-bold text-blue-600">$${data.prediction.target_price.toFixed(2)}</span></p>
+                <p class="text-lg">期待リターン: <span class="font-bold ${data.prediction.expected_return > 0 ? 'text-green-600' : 'text-red-600'}">${data.prediction.expected_return?.toFixed(1)}%</span></p>
               </div>
-            \` : ''}
+            ` : ''}
 
             <div class="bg-gray-50 p-6 rounded-lg mb-6">
               <h4 class="font-bold mb-3"><i class="fas fa-robot mr-2"></i>GPT-5による詳細解説</h4>
-              <p class="text-gray-700 whitespace-pre-wrap">\${data.prediction.detailed_explanation}</p>
+              <p class="text-gray-700 whitespace-pre-wrap">${data.prediction.detailed_explanation}</p>
             </div>
 
-            \${data.prediction.gpt5_final_judgment ? \`
+            ${data.prediction.gpt5_final_judgment ? `
             <!-- GPT-5最終判断セクション -->
             <div class="bg-gradient-to-br from-purple-600 to-indigo-700 p-6 rounded-lg shadow-xl mb-6 text-white">
               <div class="flex items-center mb-4">
@@ -3005,13 +2472,13 @@ app.get('/', (c) => {
                 <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg">
                   <p class="text-sm opacity-90 mb-2">最終判定</p>
                   <p class="text-3xl font-bold">
-                    \${data.prediction.gpt5_final_judgment.action}
-                    \${data.prediction.gpt5_final_judgment.action === 'BUY' ? '[ROCKET]' : data.prediction.gpt5_final_judgment.action === 'SELL' ? '[WARN]' : '⏸️'}
+                    ${data.prediction.gpt5_final_judgment.action}
+                    ${data.prediction.gpt5_final_judgment.action === 'BUY' ? '[ROCKET]' : data.prediction.gpt5_final_judgment.action === 'SELL' ? '[WARN]' : '⏸️'}
                   </p>
                 </div>
                 <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg">
                   <p class="text-sm opacity-90 mb-2">AI信頼度</p>
-                  <p class="text-3xl font-bold">\${data.prediction.gpt5_final_judgment.confidence}%</p>
+                  <p class="text-3xl font-bold">${data.prediction.gpt5_final_judgment.confidence}%</p>
                 </div>
               </div>
 
@@ -3023,27 +2490,27 @@ app.get('/', (c) => {
                 </div>
                 <div class="flex items-center justify-between">
                   <div>
-                    <p class="text-sm opacity-90">統計モデル判定: <span class="font-bold">\${data.prediction.action}</span></p>
-                    <p class="text-sm opacity-90">GPT-5判定: <span class="font-bold">\${data.prediction.gpt5_final_judgment.action}</span></p>
+                    <p class="text-sm opacity-90">統計モデル判定: <span class="font-bold">${data.prediction.action}</span></p>
+                    <p class="text-sm opacity-90">GPT-5判定: <span class="font-bold">${data.prediction.gpt5_final_judgment.action}</span></p>
                   </div>
                   <div class="text-right">
                     <span class="text-2xl">
-                      \${data.prediction.gpt5_final_judgment.agreement_with_statistical_model.agrees ? '[OK]' : '[WARN]'}
+                      ${data.prediction.gpt5_final_judgment.agreement_with_statistical_model.agrees ? '[OK]' : '[WARN]'}
                     </span>
                     <p class="text-xs mt-1">
-                      \${data.prediction.gpt5_final_judgment.agreement_with_statistical_model.agrees ? '一致' : '相違あり'}
+                      ${data.prediction.gpt5_final_judgment.agreement_with_statistical_model.agrees ? '一致' : '相違あり'}
                     </p>
                   </div>
                 </div>
                 <p class="text-sm mt-2 bg-white bg-opacity-10 p-2 rounded">
-                  \${data.prediction.gpt5_final_judgment.agreement_with_statistical_model.reason}
+                  ${data.prediction.gpt5_final_judgment.agreement_with_statistical_model.reason}
                 </p>
               </div>
 
               <!-- 判断理由 -->
               <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
                 <h5 class="font-bold mb-2"><i class="fas fa-comment-dots mr-2"></i>判断理由</h5>
-                <p class="text-sm leading-relaxed">\${data.prediction.gpt5_final_judgment.reasoning}</p>
+                <p class="text-sm leading-relaxed">${data.prediction.gpt5_final_judgment.reasoning}</p>
               </div>
 
               <!-- 主要要因 -->
@@ -3051,25 +2518,25 @@ app.get('/', (c) => {
                 <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg">
                   <h5 class="font-bold mb-2 text-sm"><i class="fas fa-star mr-1"></i>最重要要因</h5>
                   <ul class="space-y-1">
-                    \${data.prediction.gpt5_final_judgment.key_factors.most_important.map(f => \`
-                      <li class="text-xs">• \${f}</li>
-                    \`).join('')}
+                    ${data.prediction.gpt5_final_judgment.key_factors.most_important.map(f => `
+                      <li class="text-xs">• ${f}</li>
+                    `).join('')}
                   </ul>
                 </div>
                 <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg">
                   <h5 class="font-bold mb-2 text-sm"><i class="fas fa-check-circle mr-1"></i>支持データ</h5>
                   <ul class="space-y-1">
-                    \${data.prediction.gpt5_final_judgment.key_factors.supporting_data.slice(0, 3).map(f => \`
-                      <li class="text-xs">• \${f}</li>
-                    \`).join('')}
+                    ${data.prediction.gpt5_final_judgment.key_factors.supporting_data.slice(0, 3).map(f => `
+                      <li class="text-xs">• ${f}</li>
+                    `).join('')}
                   </ul>
                 </div>
                 <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg">
                   <h5 class="font-bold mb-2 text-sm"><i class="fas fa-exclamation-triangle mr-1"></i>懸念点</h5>
                   <ul class="space-y-1">
-                    \${data.prediction.gpt5_final_judgment.key_factors.concerns.map(f => \`
-                      <li class="text-xs">• \${f}</li>
-                    \`).join('')}
+                    ${data.prediction.gpt5_final_judgment.key_factors.concerns.map(f => `
+                      <li class="text-xs">• ${f}</li>
+                    `).join('')}
                   </ul>
                 </div>
               </div>
@@ -3078,24 +2545,24 @@ app.get('/', (c) => {
               <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
                 <div class="flex items-center justify-between mb-2">
                   <h5 class="font-bold"><i class="fas fa-shield-alt mr-2"></i>リスク評価</h5>
-                  <span class="px-3 py-1 rounded-full text-sm font-bold \${
+                  <span class="px-3 py-1 rounded-full text-sm font-bold ${
                     data.prediction.gpt5_final_judgment.risk_assessment.level === 'LOW' ? 'bg-green-500' :
                     data.prediction.gpt5_final_judgment.risk_assessment.level === 'MEDIUM' ? 'bg-yellow-500 text-gray-900' :
                     'bg-red-500'
                   }">
-                    \${data.prediction.gpt5_final_judgment.risk_assessment.level}
+                    ${data.prediction.gpt5_final_judgment.risk_assessment.level}
                   </span>
                 </div>
-                <p class="text-sm">\${data.prediction.gpt5_final_judgment.risk_assessment.description}</p>
+                <p class="text-sm">${data.prediction.gpt5_final_judgment.risk_assessment.description}</p>
               </div>
 
               <!-- 推奨事項 -->
               <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
                 <h5 class="font-bold mb-2"><i class="fas fa-lightbulb mr-2"></i>投資家への推奨</h5>
-                <p class="text-sm leading-relaxed">\${data.prediction.gpt5_final_judgment.recommendation}</p>
+                <p class="text-sm leading-relaxed">${data.prediction.gpt5_final_judgment.recommendation}</p>
               </div>
 
-              \${data.prediction.gpt5_final_judgment.price_predictions ? \`
+              ${data.prediction.gpt5_final_judgment.price_predictions ? `
               <!-- GPT-5独自の価格予測 -->
               <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
                 <h5 class="font-bold mb-3"><i class="fas fa-chart-line mr-2"></i>GPT-5独自の価格予測</h5>
@@ -3106,23 +2573,23 @@ app.get('/', (c) => {
                       <div class="bg-white bg-opacity-10 p-2 rounded">
                         <div class="flex justify-between text-xs">
                           <span>3日後:</span>
-                          <span class="font-bold">$\${data.prediction.gpt5_final_judgment.price_predictions.short_term.day_3.price.toFixed(2)}</span>
+                          <span class="font-bold">$${data.prediction.gpt5_final_judgment.price_predictions.short_term.day_3.price.toFixed(2)}</span>
                         </div>
-                        <div class="text-xs opacity-75">信頼度: \${data.prediction.gpt5_final_judgment.price_predictions.short_term.day_3.confidence}%</div>
+                        <div class="text-xs opacity-75">信頼度: ${data.prediction.gpt5_final_judgment.price_predictions.short_term.day_3.confidence}%</div>
                       </div>
                       <div class="bg-white bg-opacity-10 p-2 rounded">
                         <div class="flex justify-between text-xs">
                           <span>7日後:</span>
-                          <span class="font-bold">$\${data.prediction.gpt5_final_judgment.price_predictions.short_term.day_7.price.toFixed(2)}</span>
+                          <span class="font-bold">$${data.prediction.gpt5_final_judgment.price_predictions.short_term.day_7.price.toFixed(2)}</span>
                         </div>
-                        <div class="text-xs opacity-75">信頼度: \${data.prediction.gpt5_final_judgment.price_predictions.short_term.day_7.confidence}%</div>
+                        <div class="text-xs opacity-75">信頼度: ${data.prediction.gpt5_final_judgment.price_predictions.short_term.day_7.confidence}%</div>
                       </div>
                       <div class="bg-white bg-opacity-10 p-2 rounded">
                         <div class="flex justify-between text-xs">
                           <span>14日後:</span>
-                          <span class="font-bold">$\${data.prediction.gpt5_final_judgment.price_predictions.short_term.day_14.price.toFixed(2)}</span>
+                          <span class="font-bold">$${data.prediction.gpt5_final_judgment.price_predictions.short_term.day_14.price.toFixed(2)}</span>
                         </div>
-                        <div class="text-xs opacity-75">信頼度: \${data.prediction.gpt5_final_judgment.price_predictions.short_term.day_14.confidence}%</div>
+                        <div class="text-xs opacity-75">信頼度: ${data.prediction.gpt5_final_judgment.price_predictions.short_term.day_14.confidence}%</div>
                       </div>
                     </div>
                   </div>
@@ -3132,23 +2599,23 @@ app.get('/', (c) => {
                       <div class="bg-white bg-opacity-10 p-2 rounded">
                         <div class="flex justify-between text-xs">
                           <span>30日後:</span>
-                          <span class="font-bold">$\${data.prediction.gpt5_final_judgment.price_predictions.mid_term.day_30.price.toFixed(2)}</span>
+                          <span class="font-bold">$${data.prediction.gpt5_final_judgment.price_predictions.mid_term.day_30.price.toFixed(2)}</span>
                         </div>
-                        <div class="text-xs opacity-75">信頼度: \${data.prediction.gpt5_final_judgment.price_predictions.mid_term.day_30.confidence}%</div>
+                        <div class="text-xs opacity-75">信頼度: ${data.prediction.gpt5_final_judgment.price_predictions.mid_term.day_30.confidence}%</div>
                       </div>
                       <div class="bg-white bg-opacity-10 p-2 rounded">
                         <div class="flex justify-between text-xs">
                           <span>60日後:</span>
-                          <span class="font-bold">$\${data.prediction.gpt5_final_judgment.price_predictions.mid_term.day_60.price.toFixed(2)}</span>
+                          <span class="font-bold">$${data.prediction.gpt5_final_judgment.price_predictions.mid_term.day_60.price.toFixed(2)}</span>
                         </div>
-                        <div class="text-xs opacity-75">信頼度: \${data.prediction.gpt5_final_judgment.price_predictions.mid_term.day_60.confidence}%</div>
+                        <div class="text-xs opacity-75">信頼度: ${data.prediction.gpt5_final_judgment.price_predictions.mid_term.day_60.confidence}%</div>
                       </div>
                       <div class="bg-white bg-opacity-10 p-2 rounded">
                         <div class="flex justify-between text-xs">
                           <span>90日後:</span>
-                          <span class="font-bold">$\${data.prediction.gpt5_final_judgment.price_predictions.mid_term.day_90.price.toFixed(2)}</span>
+                          <span class="font-bold">$${data.prediction.gpt5_final_judgment.price_predictions.mid_term.day_90.price.toFixed(2)}</span>
                         </div>
-                        <div class="text-xs opacity-75">信頼度: \${data.prediction.gpt5_final_judgment.price_predictions.mid_term.day_90.confidence}%</div>
+                        <div class="text-xs opacity-75">信頼度: ${data.prediction.gpt5_final_judgment.price_predictions.mid_term.day_90.confidence}%</div>
                       </div>
                     </div>
                   </div>
@@ -3164,60 +2631,60 @@ app.get('/', (c) => {
                   現在価格からGPT-5が予測した短期・中期の価格推移
                 </p>
               </div>
-              \` : ''}
+              ` : ''}
 
-              \${data.prediction.gpt5_final_judgment.optimal_timing ? \`
+              ${data.prediction.gpt5_final_judgment.optimal_timing ? `
               <!-- 最適な売買タイミング -->
               <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
                 <h5 class="font-bold mb-3"><i class="fas fa-calendar-alt mr-2"></i>最適な売買タイミング</h5>
                 <div class="grid grid-cols-3 gap-4 mb-3">
                   <div class="bg-green-500 bg-opacity-30 p-3 rounded-lg">
                     <p class="text-xs font-bold mb-1"><i class="fas fa-arrow-down mr-1"></i>エントリー（購入）</p>
-                    <p class="text-sm font-bold mb-1">\${data.prediction.gpt5_final_judgment.optimal_timing.entry.recommended_date}</p>
-                    <p class="text-xs">価格帯: $\${data.prediction.gpt5_final_judgment.optimal_timing.entry.price_range.min.toFixed(2)} - $\${data.prediction.gpt5_final_judgment.optimal_timing.entry.price_range.max.toFixed(2)}</p>
-                    <p class="text-xs mt-2 opacity-90">\${data.prediction.gpt5_final_judgment.optimal_timing.entry.reasoning}</p>
+                    <p class="text-sm font-bold mb-1">${data.prediction.gpt5_final_judgment.optimal_timing.entry.recommended_date}</p>
+                    <p class="text-xs">価格帯: $${data.prediction.gpt5_final_judgment.optimal_timing.entry.price_range.min.toFixed(2)} - $${data.prediction.gpt5_final_judgment.optimal_timing.entry.price_range.max.toFixed(2)}</p>
+                    <p class="text-xs mt-2 opacity-90">${data.prediction.gpt5_final_judgment.optimal_timing.entry.reasoning}</p>
                   </div>
                   <div class="bg-red-500 bg-opacity-30 p-3 rounded-lg">
                     <p class="text-xs font-bold mb-1"><i class="fas fa-arrow-up mr-1"></i>エグジット（売却）</p>
-                    <p class="text-sm font-bold mb-1">\${data.prediction.gpt5_final_judgment.optimal_timing.exit.recommended_date}</p>
-                    <p class="text-xs">価格帯: $\${data.prediction.gpt5_final_judgment.optimal_timing.exit.price_range.min.toFixed(2)} - $\${data.prediction.gpt5_final_judgment.optimal_timing.exit.price_range.max.toFixed(2)}</p>
-                    <p class="text-xs mt-2 opacity-90">\${data.prediction.gpt5_final_judgment.optimal_timing.exit.reasoning}</p>
+                    <p class="text-sm font-bold mb-1">${data.prediction.gpt5_final_judgment.optimal_timing.exit.recommended_date}</p>
+                    <p class="text-xs">価格帯: $${data.prediction.gpt5_final_judgment.optimal_timing.exit.price_range.min.toFixed(2)} - $${data.prediction.gpt5_final_judgment.optimal_timing.exit.price_range.max.toFixed(2)}</p>
+                    <p class="text-xs mt-2 opacity-90">${data.prediction.gpt5_final_judgment.optimal_timing.exit.reasoning}</p>
                   </div>
                   <div class="bg-orange-500 bg-opacity-30 p-3 rounded-lg">
                     <p class="text-xs font-bold mb-1"><i class="fas fa-hand-paper mr-1"></i>ストップロス</p>
-                    <p class="text-sm font-bold mb-1">$\${data.prediction.gpt5_final_judgment.optimal_timing.stop_loss.price.toFixed(2)}</p>
-                    <p class="text-xs">(\${data.prediction.gpt5_final_judgment.optimal_timing.stop_loss.percentage.toFixed(1)}%)</p>
-                    <p class="text-xs mt-2 opacity-90">\${data.prediction.gpt5_final_judgment.optimal_timing.stop_loss.reasoning}</p>
+                    <p class="text-sm font-bold mb-1">$${data.prediction.gpt5_final_judgment.optimal_timing.stop_loss.price.toFixed(2)}</p>
+                    <p class="text-xs">(${data.prediction.gpt5_final_judgment.optimal_timing.stop_loss.percentage.toFixed(1)}%)</p>
+                    <p class="text-xs mt-2 opacity-90">${data.prediction.gpt5_final_judgment.optimal_timing.stop_loss.reasoning}</p>
                   </div>
                 </div>
               </div>
-              \` : ''}
+              ` : ''}
 
-              \${data.prediction.gpt5_final_judgment.portfolio_allocation ? \`
+              ${data.prediction.gpt5_final_judgment.portfolio_allocation ? `
               <!-- ポートフォリオ配分提案 -->
               <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
                 <h5 class="font-bold mb-3"><i class="fas fa-pie-chart mr-2"></i>ポートフォリオ配分提案</h5>
                 <div class="grid grid-cols-3 gap-4">
                   <div class="bg-white bg-opacity-10 p-3 rounded text-center">
                     <p class="text-xs mb-1">保守的投資家</p>
-                    <p class="text-3xl font-bold mb-1">\${data.prediction.gpt5_final_judgment.portfolio_allocation.conservative.percentage}%</p>
-                    <p class="text-xs opacity-90">\${data.prediction.gpt5_final_judgment.portfolio_allocation.conservative.reasoning}</p>
+                    <p class="text-3xl font-bold mb-1">${data.prediction.gpt5_final_judgment.portfolio_allocation.conservative.percentage}%</p>
+                    <p class="text-xs opacity-90">${data.prediction.gpt5_final_judgment.portfolio_allocation.conservative.reasoning}</p>
                   </div>
                   <div class="bg-white bg-opacity-10 p-3 rounded text-center">
                     <p class="text-xs mb-1">中庸投資家</p>
-                    <p class="text-3xl font-bold mb-1">\${data.prediction.gpt5_final_judgment.portfolio_allocation.moderate.percentage}%</p>
-                    <p class="text-xs opacity-90">\${data.prediction.gpt5_final_judgment.portfolio_allocation.moderate.reasoning}</p>
+                    <p class="text-3xl font-bold mb-1">${data.prediction.gpt5_final_judgment.portfolio_allocation.moderate.percentage}%</p>
+                    <p class="text-xs opacity-90">${data.prediction.gpt5_final_judgment.portfolio_allocation.moderate.reasoning}</p>
                   </div>
                   <div class="bg-white bg-opacity-10 p-3 rounded text-center">
                     <p class="text-xs mb-1">積極的投資家</p>
-                    <p class="text-3xl font-bold mb-1">\${data.prediction.gpt5_final_judgment.portfolio_allocation.aggressive.percentage}%</p>
-                    <p class="text-xs opacity-90">\${data.prediction.gpt5_final_judgment.portfolio_allocation.aggressive.reasoning}</p>
+                    <p class="text-3xl font-bold mb-1">${data.prediction.gpt5_final_judgment.portfolio_allocation.aggressive.percentage}%</p>
+                    <p class="text-xs opacity-90">${data.prediction.gpt5_final_judgment.portfolio_allocation.aggressive.reasoning}</p>
                   </div>
                 </div>
               </div>
-              \` : ''}
+              ` : ''}
 
-              \${data.prediction.gpt5_final_judgment.scenario_analysis ? \`
+              ${data.prediction.gpt5_final_judgment.scenario_analysis ? `
               <!-- シナリオ分析 -->
               <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
                 <h5 class="font-bold mb-3"><i class="fas fa-project-diagram mr-2"></i>シナリオ分析</h5>
@@ -3225,37 +2692,37 @@ app.get('/', (c) => {
                   <div class="bg-green-500 bg-opacity-20 p-3 rounded">
                     <div class="flex items-center justify-between mb-2">
                       <p class="text-xs font-bold">[DEBUG] ベストケース</p>
-                      <span class="text-xs bg-white bg-opacity-20 px-2 py-1 rounded">\${data.prediction.gpt5_final_judgment.scenario_analysis.best_case.probability}%</span>
+                      <span class="text-xs bg-white bg-opacity-20 px-2 py-1 rounded">${data.prediction.gpt5_final_judgment.scenario_analysis.best_case.probability}%</span>
                     </div>
-                    <p class="text-2xl font-bold mb-1">$\${data.prediction.gpt5_final_judgment.scenario_analysis.best_case.price_target.toFixed(2)}</p>
-                    <p class="text-xs mb-2 opacity-90">期間: \${data.prediction.gpt5_final_judgment.scenario_analysis.best_case.timeframe}</p>
+                    <p class="text-2xl font-bold mb-1">$${data.prediction.gpt5_final_judgment.scenario_analysis.best_case.price_target.toFixed(2)}</p>
+                    <p class="text-xs mb-2 opacity-90">期間: ${data.prediction.gpt5_final_judgment.scenario_analysis.best_case.timeframe}</p>
                     <p class="text-xs font-bold mb-1">前提条件:</p>
                     <ul class="text-xs space-y-1">
-                      \${data.prediction.gpt5_final_judgment.scenario_analysis.best_case.conditions.map(c => \`<li>• \${c}</li>\`).join('')}
+                      ${data.prediction.gpt5_final_judgment.scenario_analysis.best_case.conditions.map(c => `<li>• ${c}</li>`).join('')}
                     </ul>
                   </div>
                   <div class="bg-blue-500 bg-opacity-20 p-3 rounded">
                     <div class="flex items-center justify-between mb-2">
                       <p class="text-xs font-bold">[STATS] ベースケース</p>
-                      <span class="text-xs bg-white bg-opacity-20 px-2 py-1 rounded">\${data.prediction.gpt5_final_judgment.scenario_analysis.base_case.probability}%</span>
+                      <span class="text-xs bg-white bg-opacity-20 px-2 py-1 rounded">${data.prediction.gpt5_final_judgment.scenario_analysis.base_case.probability}%</span>
                     </div>
-                    <p class="text-2xl font-bold mb-1">$\${data.prediction.gpt5_final_judgment.scenario_analysis.base_case.price_target.toFixed(2)}</p>
-                    <p class="text-xs mb-2 opacity-90">期間: \${data.prediction.gpt5_final_judgment.scenario_analysis.base_case.timeframe}</p>
+                    <p class="text-2xl font-bold mb-1">$${data.prediction.gpt5_final_judgment.scenario_analysis.base_case.price_target.toFixed(2)}</p>
+                    <p class="text-xs mb-2 opacity-90">期間: ${data.prediction.gpt5_final_judgment.scenario_analysis.base_case.timeframe}</p>
                     <p class="text-xs font-bold mb-1">前提条件:</p>
                     <ul class="text-xs space-y-1">
-                      \${data.prediction.gpt5_final_judgment.scenario_analysis.base_case.conditions.map(c => \`<li>• \${c}</li>\`).join('')}
+                      ${data.prediction.gpt5_final_judgment.scenario_analysis.base_case.conditions.map(c => `<li>• ${c}</li>`).join('')}
                     </ul>
                   </div>
                   <div class="bg-red-500 bg-opacity-20 p-3 rounded">
                     <div class="flex items-center justify-between mb-2">
                       <p class="text-xs font-bold">[WARN] ワーストケース</p>
-                      <span class="text-xs bg-white bg-opacity-20 px-2 py-1 rounded">\${data.prediction.gpt5_final_judgment.scenario_analysis.worst_case.probability}%</span>
+                      <span class="text-xs bg-white bg-opacity-20 px-2 py-1 rounded">${data.prediction.gpt5_final_judgment.scenario_analysis.worst_case.probability}%</span>
                     </div>
-                    <p class="text-2xl font-bold mb-1">$\${data.prediction.gpt5_final_judgment.scenario_analysis.worst_case.price_target.toFixed(2)}</p>
-                    <p class="text-xs mb-2 opacity-90">期間: \${data.prediction.gpt5_final_judgment.scenario_analysis.worst_case.timeframe}</p>
+                    <p class="text-2xl font-bold mb-1">$${data.prediction.gpt5_final_judgment.scenario_analysis.worst_case.price_target.toFixed(2)}</p>
+                    <p class="text-xs mb-2 opacity-90">期間: ${data.prediction.gpt5_final_judgment.scenario_analysis.worst_case.timeframe}</p>
                     <p class="text-xs font-bold mb-1">前提条件:</p>
                     <ul class="text-xs space-y-1">
-                      \${data.prediction.gpt5_final_judgment.scenario_analysis.worst_case.conditions.map(c => \`<li>• \${c}</li>\`).join('')}
+                      ${data.prediction.gpt5_final_judgment.scenario_analysis.worst_case.conditions.map(c => `<li>• ${c}</li>`).join('')}
                     </ul>
                   </div>
                 </div>
@@ -3270,62 +2737,62 @@ app.get('/', (c) => {
                   ベストケース・ベースケース・ワーストケースの価格目標と確率分布
                 </p>
               </div>
-              \` : ''}
+              ` : ''}
 
-              \${data.prediction.gpt5_final_judgment.upcoming_events && data.prediction.gpt5_final_judgment.upcoming_events.length > 0 ? \`
+              ${data.prediction.gpt5_final_judgment.upcoming_events && data.prediction.gpt5_final_judgment.upcoming_events.length > 0 ? `
               <!-- 今後の重要イベント -->
               <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
                 <h5 class="font-bold mb-3"><i class="fas fa-calendar-check mr-2"></i>今後の重要イベント</h5>
                 <div class="space-y-2">
-                  \${data.prediction.gpt5_final_judgment.upcoming_events.map(event => \`
+                  ${data.prediction.gpt5_final_judgment.upcoming_events.map(event => `
                     <div class="bg-white bg-opacity-10 p-3 rounded flex items-start">
                       <div class="flex-shrink-0 mr-3">
-                        <div class="text-xs bg-white bg-opacity-20 px-2 py-1 rounded">\${event.date}</div>
+                        <div class="text-xs bg-white bg-opacity-20 px-2 py-1 rounded">${event.date}</div>
                       </div>
                       <div class="flex-grow">
                         <div class="flex items-center mb-1">
-                          <span class="text-sm font-bold mr-2">\${event.event}</span>
-                          <span class="text-xs px-2 py-1 rounded \${
+                          <span class="text-sm font-bold mr-2">${event.event}</span>
+                          <span class="text-xs px-2 py-1 rounded ${
                             event.expected_impact === 'POSITIVE' ? 'bg-green-500' :
                             event.expected_impact === 'NEGATIVE' ? 'bg-red-500' :
                             'bg-gray-500'
                           }">
-                            \${event.expected_impact === 'POSITIVE' ? '↑ ポジティブ' :
+                            ${event.expected_impact === 'POSITIVE' ? '↑ ポジティブ' :
                               event.expected_impact === 'NEGATIVE' ? '↓ ネガティブ' :
                               '→ 中立'}
                           </span>
                         </div>
-                        <p class="text-xs opacity-90">\${event.description}</p>
+                        <p class="text-xs opacity-90">${event.description}</p>
                       </div>
                     </div>
-                  \`).join('')}
+                  `).join('')}
                 </div>
               </div>
-              \` : ''}
+              ` : ''}
 
               <!-- 統計的リスク指標（Code Interpreterによる高度計算結果） -->
-              \${data.prediction.gpt5_final_judgment.statistical_metrics ? \`
+              ${data.prediction.gpt5_final_judgment.statistical_metrics ? `
               <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
                 <h5 class="font-bold mb-3"><i class="fas fa-calculator mr-2"></i>統計的リスク指標 (Code Interpreter計算)</h5>
                 <div class="grid grid-cols-4 gap-4 mb-3">
                   <div class="bg-white bg-opacity-10 p-3 rounded text-center">
                     <p class="text-xs mb-1">年率ボラティリティ</p>
-                    <p class="text-2xl font-bold">\${data.prediction.gpt5_final_judgment.statistical_metrics.annual_volatility.toFixed(2)}%</p>
+                    <p class="text-2xl font-bold">${data.prediction.gpt5_final_judgment.statistical_metrics.annual_volatility.toFixed(2)}%</p>
                     <p class="text-xs mt-1 opacity-75">価格変動の大きさ</p>
                   </div>
                   <div class="bg-white bg-opacity-10 p-3 rounded text-center">
                     <p class="text-xs mb-1">シャープレシオ</p>
-                    <p class="text-2xl font-bold">\${data.prediction.gpt5_final_judgment.statistical_metrics.sharpe_ratio.toFixed(2)}</p>
+                    <p class="text-2xl font-bold">${data.prediction.gpt5_final_judgment.statistical_metrics.sharpe_ratio.toFixed(2)}</p>
                     <p class="text-xs mt-1 opacity-75">リスク調整後リターン</p>
                   </div>
                   <div class="bg-white bg-opacity-10 p-3 rounded text-center">
                     <p class="text-xs mb-1">最大ドローダウン</p>
-                    <p class="text-2xl font-bold text-red-300">\${data.prediction.gpt5_final_judgment.statistical_metrics.max_drawdown.toFixed(2)}%</p>
+                    <p class="text-2xl font-bold text-red-300">${data.prediction.gpt5_final_judgment.statistical_metrics.max_drawdown.toFixed(2)}%</p>
                     <p class="text-xs mt-1 opacity-75">最大下落率</p>
                   </div>
                   <div class="bg-white bg-opacity-10 p-3 rounded text-center">
                     <p class="text-xs mb-1">VaR (95%)</p>
-                    <p class="text-2xl font-bold text-orange-300">$\${data.prediction.gpt5_final_judgment.statistical_metrics.value_at_risk.toFixed(2)}</p>
+                    <p class="text-2xl font-bold text-orange-300">$${data.prediction.gpt5_final_judgment.statistical_metrics.value_at_risk.toFixed(2)}</p>
                     <p class="text-xs mt-1 opacity-75">5%確率での損失額</p>
                   </div>
                 </div>
@@ -3337,25 +2804,25 @@ app.get('/', (c) => {
                   </p>
                 </div>
               </div>
-              \` : ''}
+              ` : ''}
               
               <!-- モンテカルロシミュレーション結果 -->
-              \${data.prediction.gpt5_final_judgment.monte_carlo_results ? \`
+              ${data.prediction.gpt5_final_judgment.monte_carlo_results ? `
               <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-lg mb-4">
                 <h5 class="font-bold mb-3"><i class="fas fa-dice mr-2"></i>モンテカルロシミュレーション結果</h5>
                 <canvas id="monteCarloChart" style="max-height: 300px;"></canvas>
                 <div class="grid grid-cols-3 gap-3 mt-3">
                   <div class="bg-white bg-opacity-10 p-2 rounded text-center">
                     <p class="text-xs mb-1">90日後 中央値</p>
-                    <p class="text-lg font-bold">$\${data.prediction.gpt5_final_judgment.monte_carlo_results.day_90_median.toFixed(2)}</p>
+                    <p class="text-lg font-bold">$${data.prediction.gpt5_final_judgment.monte_carlo_results.day_90_median.toFixed(2)}</p>
                   </div>
                   <div class="bg-green-500 bg-opacity-20 p-2 rounded text-center">
                     <p class="text-xs mb-1">95%信頼区間 上限</p>
-                    <p class="text-lg font-bold text-green-300">$\${data.prediction.gpt5_final_judgment.monte_carlo_results.day_90_upper.toFixed(2)}</p>
+                    <p class="text-lg font-bold text-green-300">$${data.prediction.gpt5_final_judgment.monte_carlo_results.day_90_upper.toFixed(2)}</p>
                   </div>
                   <div class="bg-red-500 bg-opacity-20 p-2 rounded text-center">
                     <p class="text-xs mb-1">95%信頼区間 下限</p>
-                    <p class="text-lg font-bold text-red-300">$\${data.prediction.gpt5_final_judgment.monte_carlo_results.day_90_lower.toFixed(2)}</p>
+                    <p class="text-lg font-bold text-red-300">$${data.prediction.gpt5_final_judgment.monte_carlo_results.day_90_lower.toFixed(2)}</p>
                   </div>
                 </div>
                 <p class="text-xs mt-3 opacity-75 text-center">
@@ -3363,7 +2830,7 @@ app.get('/', (c) => {
                   1000回のシミュレーションに基づく価格予測の分布
                 </p>
               </div>
-              \` : ''}
+              ` : ''}
 
               <!-- 使用データソース -->
               <div class="bg-white bg-opacity-10 p-3 rounded-lg">
@@ -3371,13 +2838,13 @@ app.get('/', (c) => {
                   <i class="fas fa-database mr-1"></i>分析に使用したデータソース:
                 </p>
                 <div class="flex flex-wrap gap-2">
-                  \${data.prediction.gpt5_final_judgment.data_sources_used.map(source => \`
-                    <span class="text-xs bg-white bg-opacity-20 px-2 py-1 rounded">\${source}</span>
-                  \`).join('')}
+                  ${data.prediction.gpt5_final_judgment.data_sources_used.map(source => `
+                    <span class="text-xs bg-white bg-opacity-20 px-2 py-1 rounded">${source}</span>
+                  `).join('')}
                 </div>
               </div>
             </div>
-            \` : \`
+            ` : `
             <!-- GPT-5分析が利用できない場合の表示 -->
             <div class="bg-yellow-100 border-l-4 border-yellow-500 p-6 rounded-lg mb-6">
               <div class="flex items-start">
@@ -3407,14 +2874,14 @@ app.get('/', (c) => {
                 </div>
               </div>
             </div>
-            \`}
+            `}
           </div>
 
           <div class="bg-white rounded-lg shadow-md p-6">
             <h3 class="text-xl font-bold mb-4">株価チャート（過去30日 + 未来30日予測）</h3>
             <canvas id="priceChart"></canvas>
           </div>
-        \`
+        `
 
         document.getElementById('analysis-result').innerHTML = resultHTML
         document.getElementById('analysis-result').style.display = 'block'
@@ -3983,87 +3450,15 @@ app.get('/', (c) => {
           })
         }
         
-        // 学習曲線チャート（学習が実行された場合のみ）
-        if (data.prediction.ml_training) {
-          console.log('[OK] ml_training exists, rendering learning curves...')
-          const learningCurveElement = document.getElementById('learningCurveChart')
-          if (!learningCurveElement) {
-            console.error('[ERROR] ERROR: learningCurveChart element not found in DOM!')
-            console.log('Available elements:', document.querySelectorAll('canvas').length, 'canvas elements')
+        // 特徴量重要度チャート（学習結果用）
+        if (data.prediction.ml_training && data.prediction.ml_training.feature_importance) {
+          // 特徴量重要度チャート
+          const featureImportanceTrainingCtx = document.getElementById('featureImportanceTrainingChart')?.getContext('2d')
+          if (!featureImportanceTrainingCtx) {
+            console.warn('[WARN] featureImportanceTrainingChart element not found, skipping...')
           } else {
-            console.log('[OK] learningCurveChart element found')
-          }
-          const learningCurveCtx = learningCurveElement.getContext('2d')
           const trainingData = data.prediction.ml_training
-          
-          new Chart(learningCurveCtx, {
-            type: 'line',
-            data: {
-              labels: trainingData.learning_curves.iterations,
-              datasets: [
-                {
-                  label: 'Train Loss (RMSE)',
-                  data: trainingData.learning_curves.train_loss,
-                  borderColor: 'rgb(59, 130, 246)',
-                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                  borderWidth: 2,
-                  tension: 0.3,
-                  fill: false,
-                  pointRadius: 0
-                },
-                {
-                  label: 'Validation Loss (RMSE)',
-                  data: trainingData.learning_curves.val_loss,
-                  borderColor: 'rgb(239, 68, 68)',
-                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                  borderWidth: 2,
-                  tension: 0.3,
-                  fill: false,
-                  pointRadius: 0
-                }
-              ]
-            },
-            options: {
-              responsive: true,
-              maintainAspectRatio: false,
-              interaction: {
-                mode: 'index',
-                intersect: false
-              },
-              plugins: {
-                legend: {
-                  display: true,
-                  position: 'top'
-                },
-                tooltip: {
-                  callbacks: {
-                    label: function(context) {
-                      return context.dataset.label + ': $' + context.parsed.y.toFixed(2)
-                    }
-                  }
-                }
-              },
-              scales: {
-                y: {
-                  beginAtZero: false,
-                  title: {
-                    display: true,
-                    text: 'RMSE Loss (USD)'
-                  }
-                },
-                x: {
-                  title: {
-                    display: true,
-                    text: 'Iteration'
-                  }
-                }
-              }
-            }
-          })
-
-          // 特徴量重要度チャート（学習結果用）
-          const featureImportanceTrainingCtx = document.getElementById('featureImportanceTrainingChart').getContext('2d')
-          const topFeatures = trainingData.feature_importances.slice(0, 10)
+          const topFeatures = trainingData.feature_importance.slice(0, 10)
           
           // 最大重要度で正規化
           const maxImportance = Math.max(...topFeatures.map(f => f.importance))
@@ -4104,8 +3499,12 @@ app.get('/', (c) => {
               }
             }
           })
+          }
+        }
           
           // ML未来予測チャート（過去30日 + 未来30日）
+          if (data.prediction.ml_training) {
+          const trainingData = data.prediction.ml_training
           console.log('[INFO] Checking future predictions:', {
             has_future_predictions: !!trainingData.future_predictions,
             has_backfit: !!data.prediction.backfit,
@@ -4493,7 +3892,7 @@ app.get('/', (c) => {
         const response = await axios.get('/api/recommendations')
         const data = response.data
 
-        const resultHTML = \`
+        const resultHTML = `
           <div class="bg-white rounded-lg shadow-md overflow-hidden">
             <table class="w-full">
               <thead class="bg-gray-100">
@@ -4509,36 +3908,36 @@ app.get('/', (c) => {
                 </tr>
               </thead>
               <tbody>
-                \${data.recommendations.map((rec, index) => \`
+                ${data.recommendations.map((rec, index) => `
                   <tr class="border-t hover:bg-gray-50">
-                    <td class="px-6 py-4 font-bold">#\${index + 1}</td>
-                    <td class="px-6 py-4 font-semibold">\${rec.symbol}</td>
-                    <td class="px-6 py-4 text-right font-bold text-blue-600">\${rec.score}</td>
+                    <td class="px-6 py-4 font-bold">#${index + 1}</td>
+                    <td class="px-6 py-4 font-semibold">${rec.symbol}</td>
+                    <td class="px-6 py-4 text-right font-bold text-blue-600">${rec.score}</td>
                     <td class="px-6 py-4 text-center">
-                      <span class="px-3 py-1 rounded-full text-sm font-semibold \${rec.action === 'BUY' ? 'bg-green-100 text-green-800' : rec.action === 'SELL' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}">
-                        \${rec.action}
+                      <span class="px-3 py-1 rounded-full text-sm font-semibold ${rec.action === 'BUY' ? 'bg-green-100 text-green-800' : rec.action === 'SELL' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}">
+                        ${rec.action}
                       </span>
                     </td>
-                    <td class="px-6 py-4 text-right">$\${rec.currentPrice.toFixed(2)}</td>
-                    <td class="px-6 py-4 text-right \${rec.expectedReturn > 0 ? 'text-green-600' : 'text-red-600'} font-semibold">
-                      \${rec.expectedReturn?.toFixed(1)}%
+                    <td class="px-6 py-4 text-right">$${rec.currentPrice.toFixed(2)}</td>
+                    <td class="px-6 py-4 text-right ${rec.expectedReturn > 0 ? 'text-green-600' : 'text-red-600'} font-semibold">
+                      ${rec.expectedReturn?.toFixed(1)}%
                     </td>
                     <td class="px-6 py-4 text-center">
-                      <span class="px-3 py-1 rounded-full text-xs font-bold \${rec.confidence >= 70 ? 'bg-green-100 text-green-800' : rec.confidence >= 50 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}">
-                        \${rec.confidence}%
+                      <span class="px-3 py-1 rounded-full text-xs font-bold ${rec.confidence >= 70 ? 'bg-green-100 text-green-800' : rec.confidence >= 50 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}">
+                        ${rec.confidence}%
                       </span>
                     </td>
                     <td class="px-6 py-4 text-center">
-                      <button onclick="document.getElementById('symbol-input').value='\${rec.symbol}'; switchTab('analysis'); analyzeStock()" class="text-blue-600 hover:underline">
+                      <button onclick="document.getElementById('symbol-input').value='${rec.symbol}'; switchTab('analysis'); analyzeStock()" class="text-blue-600 hover:underline">
                         <i class="fas fa-search"></i> 分析
                       </button>
                     </td>
                   </tr>
-                \`).join('')}
+                `).join('')}
               </tbody>
             </table>
           </div>
-        \`
+        `
 
         document.getElementById('recommendations-result').innerHTML = resultHTML
 
@@ -4576,30 +3975,30 @@ app.get('/', (c) => {
         const profitColor = data.summary.profit >= 0 ? 'text-green-600' : 'text-red-600'
         const profitBg = data.summary.profit >= 0 ? 'bg-green-50' : 'bg-red-50'
 
-        const resultHTML = \`
+        const resultHTML = `
           <div class="bg-white rounded-lg shadow-md p-6 mb-6">
-            <h3 class="text-2xl font-bold mb-6">\${symbol} 投資シミュレーション結果</h3>
+            <h3 class="text-2xl font-bold mb-6">${symbol} 投資シミュレーション結果</h3>
             
             <div class="grid grid-cols-2 gap-6 mb-6">
-              <div class="\${profitBg} p-6 rounded-lg">
+              <div class="${profitBg} p-6 rounded-lg">
                 <h4 class="font-bold mb-4">サマリー</h4>
                 <div class="space-y-2">
-                  <p><span class="text-gray-600">購入日:</span> <span class="font-semibold">\${data.summary.purchaseDate}</span></p>
-                  <p><span class="text-gray-600">購入価格:</span> <span class="font-semibold">$\${data.summary.purchasePrice.toFixed(2)}</span></p>
-                  <p><span class="text-gray-600">売却日:</span> <span class="font-semibold">\${data.summary.sellDate}</span></p>
-                  <p><span class="text-gray-600">売却価格:</span> <span class="font-semibold">$\${data.summary.sellPrice.toFixed(2)}</span></p>
-                  <p><span class="text-gray-600">保有期間:</span> <span class="font-semibold">\${data.summary.holdingPeriodDays}日</span></p>
+                  <p><span class="text-gray-600">購入日:</span> <span class="font-semibold">${data.summary.purchaseDate}</span></p>
+                  <p><span class="text-gray-600">購入価格:</span> <span class="font-semibold">$${data.summary.purchasePrice.toFixed(2)}</span></p>
+                  <p><span class="text-gray-600">売却日:</span> <span class="font-semibold">${data.summary.sellDate}</span></p>
+                  <p><span class="text-gray-600">売却価格:</span> <span class="font-semibold">$${data.summary.sellPrice.toFixed(2)}</span></p>
+                  <p><span class="text-gray-600">保有期間:</span> <span class="font-semibold">${data.summary.holdingPeriodDays}日</span></p>
                 </div>
               </div>
               
               <div class="bg-blue-50 p-6 rounded-lg">
                 <h4 class="font-bold mb-4">投資結果</h4>
                 <div class="space-y-2">
-                  <p><span class="text-gray-600">株数:</span> <span class="font-semibold">\${data.summary.shares}株</span></p>
-                  <p><span class="text-gray-600">投資額:</span> <span class="font-semibold">$\${data.summary.investmentAmount.toFixed(2)}</span></p>
-                  <p><span class="text-gray-600">最終評価額:</span> <span class="font-semibold">$\${data.summary.finalValue.toFixed(2)}</span></p>
-                  <p class="text-2xl"><span class="text-gray-600">損益:</span> <span class="font-bold \${profitColor}">$\${data.summary.profit.toFixed(2)}</span></p>
-                  <p class="text-2xl"><span class="text-gray-600">リターン:</span> <span class="font-bold \${profitColor}">\${data.summary.returnRate.toFixed(2)}%</span></p>
+                  <p><span class="text-gray-600">株数:</span> <span class="font-semibold">${data.summary.shares}株</span></p>
+                  <p><span class="text-gray-600">投資額:</span> <span class="font-semibold">$${data.summary.investmentAmount.toFixed(2)}</span></p>
+                  <p><span class="text-gray-600">最終評価額:</span> <span class="font-semibold">$${data.summary.finalValue.toFixed(2)}</span></p>
+                  <p class="text-2xl"><span class="text-gray-600">損益:</span> <span class="font-bold ${profitColor}">$${data.summary.profit.toFixed(2)}</span></p>
+                  <p class="text-2xl"><span class="text-gray-600">リターン:</span> <span class="font-bold ${profitColor}">${data.summary.returnRate.toFixed(2)}%</span></p>
                 </div>
               </div>
             </div>
@@ -4609,15 +4008,15 @@ app.get('/', (c) => {
               <div class="grid grid-cols-3 gap-4">
                 <div>
                   <p class="text-sm text-gray-600">最大ドローダウン</p>
-                  <p class="text-xl font-bold text-red-600">\${data.statistics.maxDrawdown.toFixed(2)}%</p>
+                  <p class="text-xl font-bold text-red-600">${data.statistics.maxDrawdown.toFixed(2)}%</p>
                 </div>
                 <div>
                   <p class="text-sm text-gray-600">ボラティリティ（年率）</p>
-                  <p class="text-xl font-bold text-purple-600">\${data.statistics.volatility.toFixed(2)}%</p>
+                  <p class="text-xl font-bold text-purple-600">${data.statistics.volatility.toFixed(2)}%</p>
                 </div>
                 <div>
                   <p class="text-sm text-gray-600">最良の日</p>
-                  <p class="text-sm font-semibold text-green-600">\${data.statistics.bestDay.date}: +\${data.statistics.bestDay.return.toFixed(2)}%</p>
+                  <p class="text-sm font-semibold text-green-600">${data.statistics.bestDay.date}: +${data.statistics.bestDay.return.toFixed(2)}%</p>
                 </div>
               </div>
             </div>
@@ -4627,7 +4026,7 @@ app.get('/', (c) => {
               <canvas id="simulationChart"></canvas>
             </div>
           </div>
-        \`
+        `
 
         document.getElementById('simulation-result').innerHTML = resultHTML
 
@@ -4688,24 +4087,24 @@ app.get('/', (c) => {
         const response = await axios.post('/api/backtest', { symbol, testDate })
         const data = response.data
 
-        const resultHTML = \`
+        const resultHTML = `
           <div class="bg-white rounded-lg shadow-md p-6">
-            <h3 class="text-2xl font-bold mb-6">\${symbol} バックテスト結果</h3>
+            <h3 class="text-2xl font-bold mb-6">${symbol} バックテスト結果</h3>
             
             <div class="bg-blue-50 p-6 rounded-lg mb-6">
-              <h4 class="font-bold mb-3">予測情報（\${data.testDate}時点）</h4>
+              <h4 class="font-bold mb-3">予測情報（${data.testDate}時点）</h4>
               <div class="grid grid-cols-3 gap-4">
                 <div class="text-center">
                   <p class="text-sm text-gray-600">判定</p>
-                  <p class="text-3xl font-bold \${data.prediction.action === 'BUY' ? 'text-green-600' : data.prediction.action === 'SELL' ? 'text-red-600' : 'text-gray-600'}">\${data.prediction.action}</p>
+                  <p class="text-3xl font-bold ${data.prediction.action === 'BUY' ? 'text-green-600' : data.prediction.action === 'SELL' ? 'text-red-600' : 'text-gray-600'}">${data.prediction.action}</p>
                 </div>
                 <div class="text-center">
                   <p class="text-sm text-gray-600">スコア</p>
-                  <p class="text-3xl font-bold text-blue-600">\${data.prediction.score}</p>
+                  <p class="text-3xl font-bold text-blue-600">${data.prediction.score}</p>
                 </div>
                 <div class="text-center">
                   <p class="text-sm text-gray-600">信頼度</p>
-                  <p class="text-3xl font-bold text-purple-600">\${data.prediction.confidence}%</p>
+                  <p class="text-3xl font-bold text-purple-600">${data.prediction.confidence}%</p>
                 </div>
               </div>
             </div>
@@ -4715,22 +4114,22 @@ app.get('/', (c) => {
               <div class="grid grid-cols-4 gap-4">
                 <div>
                   <p class="text-sm text-gray-600">予測時の株価</p>
-                  <p class="text-xl font-bold">$\${data.actualOutcome.priceAtPrediction.toFixed(2)}</p>
+                  <p class="text-xl font-bold">$${data.actualOutcome.priceAtPrediction.toFixed(2)}</p>
                 </div>
                 <div>
                   <p class="text-sm text-gray-600">1週間後</p>
-                  <p class="text-xl font-bold">$\${data.actualOutcome.priceAfter1Week.toFixed(2)}</p>
-                  <p class="text-sm \${data.actualOutcome.return1Week >= 0 ? 'text-green-600' : 'text-red-600'}">\${data.actualOutcome.return1Week.toFixed(2)}%</p>
+                  <p class="text-xl font-bold">$${data.actualOutcome.priceAfter1Week.toFixed(2)}</p>
+                  <p class="text-sm ${data.actualOutcome.return1Week >= 0 ? 'text-green-600' : 'text-red-600'}">${data.actualOutcome.return1Week.toFixed(2)}%</p>
                 </div>
                 <div>
                   <p class="text-sm text-gray-600">1ヶ月後</p>
-                  <p class="text-xl font-bold">$\${data.actualOutcome.priceAfter1Month.toFixed(2)}</p>
-                  <p class="text-sm \${data.actualOutcome.return1Month >= 0 ? 'text-green-600' : 'text-red-600'}">\${data.actualOutcome.return1Month.toFixed(2)}%</p>
+                  <p class="text-xl font-bold">$${data.actualOutcome.priceAfter1Month.toFixed(2)}</p>
+                  <p class="text-sm ${data.actualOutcome.return1Month >= 0 ? 'text-green-600' : 'text-red-600'}">${data.actualOutcome.return1Month.toFixed(2)}%</p>
                 </div>
                 <div>
                   <p class="text-sm text-gray-600">3ヶ月後</p>
-                  <p class="text-xl font-bold">$\${data.actualOutcome.priceAfter3Months.toFixed(2)}</p>
-                  <p class="text-sm \${data.actualOutcome.return3Months >= 0 ? 'text-green-600' : 'text-red-600'}">\${data.actualOutcome.return3Months.toFixed(2)}%</p>
+                  <p class="text-xl font-bold">$${data.actualOutcome.priceAfter3Months.toFixed(2)}</p>
+                  <p class="text-sm ${data.actualOutcome.return3Months >= 0 ? 'text-green-600' : 'text-red-600'}">${data.actualOutcome.return3Months.toFixed(2)}%</p>
                 </div>
               </div>
             </div>
@@ -4740,30 +4139,30 @@ app.get('/', (c) => {
               <div class="grid grid-cols-4 gap-4">
                 <div class="text-center">
                   <p class="text-sm text-gray-600">総合精度スコア</p>
-                  <p class="text-4xl font-bold text-blue-600">\${data.accuracy.overallScore.toFixed(0)}%</p>
+                  <p class="text-4xl font-bold text-blue-600">${data.accuracy.overallScore.toFixed(0)}%</p>
                 </div>
                 <div class="text-center">
                   <p class="text-sm text-gray-600">1週間後</p>
-                  <p class="text-2xl font-bold \${data.accuracy.direction1Week === 'correct' ? 'text-green-600' : data.accuracy.direction1Week === 'incorrect' ? 'text-red-600' : 'text-gray-600'}">
-                    \${data.accuracy.direction1Week === 'correct' ? '✓' : data.accuracy.direction1Week === 'incorrect' ? '✗' : '○'}
+                  <p class="text-2xl font-bold ${data.accuracy.direction1Week === 'correct' ? 'text-green-600' : data.accuracy.direction1Week === 'incorrect' ? 'text-red-600' : 'text-gray-600'}">
+                    ${data.accuracy.direction1Week === 'correct' ? '✓' : data.accuracy.direction1Week === 'incorrect' ? '✗' : '○'}
                   </p>
                 </div>
                 <div class="text-center">
                   <p class="text-sm text-gray-600">1ヶ月後</p>
-                  <p class="text-2xl font-bold \${data.accuracy.direction1Month === 'correct' ? 'text-green-600' : data.accuracy.direction1Month === 'incorrect' ? 'text-red-600' : 'text-gray-600'}">
-                    \${data.accuracy.direction1Month === 'correct' ? '✓' : data.accuracy.direction1Month === 'incorrect' ? '✗' : '○'}
+                  <p class="text-2xl font-bold ${data.accuracy.direction1Month === 'correct' ? 'text-green-600' : data.accuracy.direction1Month === 'incorrect' ? 'text-red-600' : 'text-gray-600'}">
+                    ${data.accuracy.direction1Month === 'correct' ? '✓' : data.accuracy.direction1Month === 'incorrect' ? '✗' : '○'}
                   </p>
                 </div>
                 <div class="text-center">
                   <p class="text-sm text-gray-600">3ヶ月後</p>
-                  <p class="text-2xl font-bold \${data.accuracy.direction3Months === 'correct' ? 'text-green-600' : data.accuracy.direction3Months === 'incorrect' ? 'text-red-600' : 'text-gray-600'}">
-                    \${data.accuracy.direction3Months === 'correct' ? '✓' : data.accuracy.direction3Months === 'incorrect' ? '✗' : '○'}
+                  <p class="text-2xl font-bold ${data.accuracy.direction3Months === 'correct' ? 'text-green-600' : data.accuracy.direction3Months === 'incorrect' ? 'text-red-600' : 'text-gray-600'}">
+                    ${data.accuracy.direction3Months === 'correct' ? '✓' : data.accuracy.direction3Months === 'incorrect' ? '✗' : '○'}
                   </p>
                 </div>
               </div>
             </div>
           </div>
-        \`
+        `
 
         document.getElementById('backtest-result').innerHTML = resultHTML
 
@@ -4861,17 +4260,17 @@ app.get('/', (c) => {
         // 空の結果チェック
         if (!data.rankings || data.rankings.length === 0) {
           console.warn('[WARN] No rankings returned from API')
-          document.getElementById('rankings-result').innerHTML = \`
+          document.getElementById('rankings-result').innerHTML = `
             <div class="bg-yellow-50 border-l-4 border-yellow-500 p-6 rounded">
               <p class="text-yellow-700">
                 <i class="fas fa-exclamation-circle mr-2"></i>
                 ランキング結果が0件でした。条件を満たす銘柄がありませんでした。
               </p>
               <p class="text-sm text-gray-600 mt-2">
-                分析銘柄数: \${data.metadata?.totalScanned || 0}銘柄
+                分析銘柄数: ${data.metadata?.totalScanned || 0}銘柄
               </p>
             </div>
-          \`
+          `
           document.getElementById('rankings-result').style.display = 'block'
           return
         }
@@ -4881,14 +4280,14 @@ app.get('/', (c) => {
         
       } catch (error) {
         const errorMsg = error.response?.data?.error || error.message
-        document.getElementById('rankings-result').innerHTML = \`
+        document.getElementById('rankings-result').innerHTML = `
           <div class="bg-red-50 border-l-4 border-red-500 p-6 rounded">
             <p class="text-red-700">
               <i class="fas fa-exclamation-triangle mr-2"></i>
-              エラーが発生しました: \${errorMsg}
+              エラーが発生しました: ${errorMsg}
             </p>
           </div>
-        \`
+        `
         document.getElementById('rankings-result').style.display = 'block'
       } finally {
         // 202（処理中）の場合はローディングを残す
@@ -4913,26 +4312,26 @@ app.get('/', (c) => {
         'trending': '注目株'
       }
       
-      let html = \`
+      let html = `
         <div class="bg-white rounded-lg shadow-md p-6 mb-6">
           <div class="flex justify-between items-center mb-4">
             <h3 class="text-2xl font-bold">
               <i class="fas fa-trophy mr-2 text-yellow-600"></i>
-              \${typeLabels[type]}ランキング
+              ${typeLabels[type]}ランキング
             </h3>
             <div class="text-sm text-gray-600">
               <i class="fas fa-clock mr-1"></i>
-              更新: \${new Date(data.metadata.timestamp).toLocaleString('ja-JP')}
-              \${data.metadata.cacheHit ? '<span class="ml-2 px-2 py-1 bg-green-100 text-green-800 rounded text-xs">キャッシュ</span>' : ''}
+              更新: ${new Date(data.metadata.timestamp).toLocaleString('ja-JP')}
+              ${data.metadata.cacheHit ? '<span class="ml-2 px-2 py-1 bg-green-100 text-green-800 rounded text-xs">キャッシュ</span>' : ''}
             </div>
           </div>
           
           <div class="mb-4 text-sm text-gray-600">
             <i class="fas fa-info-circle mr-1"></i>
-            分析銘柄数: \${data.metadata.totalScanned}銘柄 | 
-            実行時間: \${(data.metadata.executionTime / 1000).toFixed(1)}秒
+            分析銘柄数: ${data.metadata.totalScanned}銘柄 | 
+            実行時間: ${(data.metadata.executionTime / 1000).toFixed(1)}秒
           </div>
-      \`
+      `
       
       // ランキングタイプごとに異なる表示
       if (type === 'recommended') {
@@ -4953,7 +4352,7 @@ app.get('/', (c) => {
     
     // おすすめTOP10表示
     function displayRecommendedRanking(rankings) {
-      return \`
+      return `
         <div class="overflow-x-auto">
           <table class="w-full">
             <thead class="bg-gradient-to-r from-blue-50 to-purple-50">
@@ -4970,42 +4369,42 @@ app.get('/', (c) => {
               </tr>
             </thead>
             <tbody>
-              \${rankings.map((rank, index) => \`
+              ${rankings.map((rank, index) => `
                 <tr class="border-t hover:bg-gray-50 transition">
                   <td class="px-4 py-4">
-                    <span class="inline-flex items-center justify-center w-8 h-8 rounded-full \${index < 3 ? 'bg-yellow-400 text-white' : 'bg-gray-200 text-gray-700'} font-bold">
-                      \${index + 1}
+                    <span class="inline-flex items-center justify-center w-8 h-8 rounded-full ${index < 3 ? 'bg-yellow-400 text-white' : 'bg-gray-200 text-gray-700'} font-bold">
+                      ${index + 1}
                     </span>
                   </td>
-                  <td class="px-4 py-4 font-bold text-lg">\${rank.symbol}</td>
+                  <td class="px-4 py-4 font-bold text-lg">${rank.symbol}</td>
                   <td class="px-4 py-4 text-right">
-                    <span class="text-2xl font-bold text-blue-600">\${rank.totalScore}</span>
+                    <span class="text-2xl font-bold text-blue-600">${rank.totalScore}</span>
                   </td>
-                  <td class="px-4 py-4 text-right text-blue-600 font-semibold">\${rank.technicalScore}</td>
-                  <td class="px-4 py-4 text-right text-green-600 font-semibold">\${rank.fundamentalScore}</td>
-                  <td class="px-4 py-4 text-right text-yellow-600 font-semibold">\${rank.sentimentScore}</td>
-                  <td class="px-4 py-4 text-right font-semibold">$\${rank.currentPrice.toFixed(2)}</td>
+                  <td class="px-4 py-4 text-right text-blue-600 font-semibold">${rank.technicalScore}</td>
+                  <td class="px-4 py-4 text-right text-green-600 font-semibold">${rank.fundamentalScore}</td>
+                  <td class="px-4 py-4 text-right text-yellow-600 font-semibold">${rank.sentimentScore}</td>
+                  <td class="px-4 py-4 text-right font-semibold">$${rank.currentPrice.toFixed(2)}</td>
                   <td class="px-4 py-4 text-center">
-                    <span class="px-3 py-1 rounded-full text-sm font-bold \${rank.action === 'BUY' ? 'bg-green-100 text-green-800' : rank.action === 'SELL' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}">
-                      \${rank.action}
+                    <span class="px-3 py-1 rounded-full text-sm font-bold ${rank.action === 'BUY' ? 'bg-green-100 text-green-800' : rank.action === 'SELL' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}">
+                      ${rank.action}
                     </span>
                   </td>
                   <td class="px-4 py-4 text-center">
-                    <button onclick="analyzeStockFromRanking('\${rank.symbol}')" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm">
+                    <button onclick="analyzeStockFromRanking('${rank.symbol}')" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm">
                       <i class="fas fa-chart-line mr-1"></i>詳細分析
                     </button>
                   </td>
                 </tr>
-              \`).join('')}
+              `).join('')}
             </tbody>
           </table>
         </div>
-      \`
+      `
     }
     
     // 高成長×信頼度ランキング表示
     function displayHighGrowthRanking(rankings) {
-      return \`
+      return `
         <div class="overflow-x-auto">
           <table class="w-full">
             <thead class="bg-gradient-to-r from-green-50 to-blue-50">
@@ -5022,42 +4421,42 @@ app.get('/', (c) => {
               </tr>
             </thead>
             <tbody>
-              \${rankings.map((rank, index) => \`
+              ${rankings.map((rank, index) => `
                 <tr class="border-t hover:bg-gray-50 transition">
                   <td class="px-4 py-4">
-                    <span class="inline-flex items-center justify-center w-8 h-8 rounded-full \${index < 3 ? 'bg-yellow-400 text-white' : 'bg-gray-200 text-gray-700'} font-bold">
-                      \${index + 1}
+                    <span class="inline-flex items-center justify-center w-8 h-8 rounded-full ${index < 3 ? 'bg-yellow-400 text-white' : 'bg-gray-200 text-gray-700'} font-bold">
+                      ${index + 1}
                     </span>
                   </td>
-                  <td class="px-4 py-4 font-bold text-lg">\${rank.symbol}</td>
+                  <td class="px-4 py-4 font-bold text-lg">${rank.symbol}</td>
                   <td class="px-4 py-4 text-right">
-                    <span class="text-2xl font-bold text-green-600">\${rank.totalScore}</span>
+                    <span class="text-2xl font-bold text-green-600">${rank.totalScore}</span>
                   </td>
-                  <td class="px-4 py-4 text-right font-semibold">$\${rank.currentPrice.toFixed(2)}</td>
-                  <td class="px-4 py-4 text-right font-semibold text-blue-600">$\${rank.predictedPrice.toFixed(2)}</td>
+                  <td class="px-4 py-4 text-right font-semibold">$${rank.currentPrice.toFixed(2)}</td>
+                  <td class="px-4 py-4 text-right font-semibold text-blue-600">$${rank.predictedPrice.toFixed(2)}</td>
                   <td class="px-4 py-4 text-right">
-                    <span class="text-xl font-bold text-green-600">+\${rank.predictedGain.toFixed(1)}%</span>
+                    <span class="text-xl font-bold text-green-600">+${rank.predictedGain.toFixed(1)}%</span>
                   </td>
                   <td class="px-4 py-4 text-right">
-                    <span class="font-semibold text-purple-600">\${rank.confidence}%</span>
+                    <span class="font-semibold text-purple-600">${rank.confidence}%</span>
                   </td>
-                  <td class="px-4 py-4 text-right text-gray-600">\${rank.timeframe}</td>
+                  <td class="px-4 py-4 text-right text-gray-600">${rank.timeframe}</td>
                   <td class="px-4 py-4 text-center">
-                    <button onclick="analyzeStockFromRanking('\${rank.symbol}')" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm">
+                    <button onclick="analyzeStockFromRanking('${rank.symbol}')" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm">
                       <i class="fas fa-chart-line mr-1"></i>詳細分析
                     </button>
                   </td>
                 </tr>
-              \`).join('')}
+              `).join('')}
             </tbody>
           </table>
         </div>
-      \`
+      `
     }
     
     // 短期トレードランキング表示
     function displayShortTermRanking(rankings) {
-      return \`
+      return `
         <div class="overflow-x-auto">
           <table class="w-full">
             <thead class="bg-gradient-to-r from-yellow-50 to-orange-50">
@@ -5074,42 +4473,42 @@ app.get('/', (c) => {
               </tr>
             </thead>
             <tbody>
-              \${rankings.map((rank, index) => \`
+              ${rankings.map((rank, index) => `
                 <tr class="border-t hover:bg-gray-50 transition">
                   <td class="px-4 py-4">
-                    <span class="inline-flex items-center justify-center w-8 h-8 rounded-full \${index < 3 ? 'bg-yellow-400 text-white' : 'bg-gray-200 text-gray-700'} font-bold">
-                      \${index + 1}
+                    <span class="inline-flex items-center justify-center w-8 h-8 rounded-full ${index < 3 ? 'bg-yellow-400 text-white' : 'bg-gray-200 text-gray-700'} font-bold">
+                      ${index + 1}
                     </span>
                   </td>
-                  <td class="px-4 py-4 font-bold text-lg">\${rank.symbol}</td>
+                  <td class="px-4 py-4 font-bold text-lg">${rank.symbol}</td>
                   <td class="px-4 py-4 text-right">
-                    <span class="text-2xl font-bold text-orange-600">\${rank.totalScore}</span>
+                    <span class="text-2xl font-bold text-orange-600">${rank.totalScore}</span>
                   </td>
-                  <td class="px-4 py-4 text-right font-semibold">$\${rank.currentPrice.toFixed(2)}</td>
-                  <td class="px-4 py-4 text-right font-semibold text-blue-600">\${rank.technicalSignal}</td>
-                  <td class="px-4 py-4 text-right text-purple-600">\${rank.volatility.toFixed(1)}%</td>
-                  <td class="px-4 py-4 text-right text-green-600">\${rank.momentum.toFixed(1)}</td>
+                  <td class="px-4 py-4 text-right font-semibold">$${rank.currentPrice.toFixed(2)}</td>
+                  <td class="px-4 py-4 text-right font-semibold text-blue-600">${rank.technicalSignal}</td>
+                  <td class="px-4 py-4 text-right text-purple-600">${rank.volatility.toFixed(1)}%</td>
+                  <td class="px-4 py-4 text-right text-green-600">${rank.momentum.toFixed(1)}</td>
                   <td class="px-4 py-4 text-center">
-                    <span class="px-3 py-1 rounded-full text-sm font-bold \${rank.entryTiming === 'NOW' ? 'bg-green-100 text-green-800' : rank.entryTiming === 'WAIT' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}">
-                      \${rank.entryTiming}
+                    <span class="px-3 py-1 rounded-full text-sm font-bold ${rank.entryTiming === 'NOW' ? 'bg-green-100 text-green-800' : rank.entryTiming === 'WAIT' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}">
+                      ${rank.entryTiming}
                     </span>
                   </td>
                   <td class="px-4 py-4 text-center">
-                    <button onclick="analyzeStockFromRanking('\${rank.symbol}')" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm">
+                    <button onclick="analyzeStockFromRanking('${rank.symbol}')" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm">
                       <i class="fas fa-chart-line mr-1"></i>詳細分析
                     </button>
                   </td>
                 </tr>
-              \`).join('')}
+              `).join('')}
             </tbody>
           </table>
         </div>
-      \`
+      `
     }
     
     // 注目株ランキング表示
     function displayTrendingRanking(rankings) {
-      return \`
+      return `
         <div class="overflow-x-auto">
           <table class="w-full">
             <thead class="bg-gradient-to-r from-red-50 to-pink-50">
@@ -5126,33 +4525,33 @@ app.get('/', (c) => {
               </tr>
             </thead>
             <tbody>
-              \${rankings.map((rank, index) => \`
+              ${rankings.map((rank, index) => `
                 <tr class="border-t hover:bg-gray-50 transition">
                   <td class="px-4 py-4">
-                    <span class="inline-flex items-center justify-center w-8 h-8 rounded-full \${index < 3 ? 'bg-yellow-400 text-white' : 'bg-gray-200 text-gray-700'} font-bold">
-                      \${index + 1}
+                    <span class="inline-flex items-center justify-center w-8 h-8 rounded-full ${index < 3 ? 'bg-yellow-400 text-white' : 'bg-gray-200 text-gray-700'} font-bold">
+                      ${index + 1}
                     </span>
                   </td>
-                  <td class="px-4 py-4 font-bold text-lg">\${rank.symbol}</td>
+                  <td class="px-4 py-4 font-bold text-lg">${rank.symbol}</td>
                   <td class="px-4 py-4 text-right">
-                    <span class="text-2xl font-bold text-red-600">\${rank.totalScore}</span>
+                    <span class="text-2xl font-bold text-red-600">${rank.totalScore}</span>
                   </td>
-                  <td class="px-4 py-4 text-right font-semibold">$\${rank.currentPrice.toFixed(2)}</td>
-                  <td class="px-4 py-4 text-right font-semibold text-blue-600">\${rank.newsScore}</td>
-                  <td class="px-4 py-4 text-right font-semibold text-purple-600">\${rank.socialScore}</td>
-                  <td class="px-4 py-4 text-right font-semibold text-green-600">\${rank.analystScore}</td>
-                  <td class="px-4 py-4 text-sm text-gray-700">\${rank.trendReason}</td>
+                  <td class="px-4 py-4 text-right font-semibold">$${rank.currentPrice.toFixed(2)}</td>
+                  <td class="px-4 py-4 text-right font-semibold text-blue-600">${rank.newsScore}</td>
+                  <td class="px-4 py-4 text-right font-semibold text-purple-600">${rank.socialScore}</td>
+                  <td class="px-4 py-4 text-right font-semibold text-green-600">${rank.analystScore}</td>
+                  <td class="px-4 py-4 text-sm text-gray-700">${rank.trendReason}</td>
                   <td class="px-4 py-4 text-center">
-                    <button onclick="analyzeStockFromRanking('\${rank.symbol}')" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm">
+                    <button onclick="analyzeStockFromRanking('${rank.symbol}')" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm">
                       <i class="fas fa-chart-line mr-1"></i>詳細分析
                     </button>
                   </td>
                 </tr>
-              \`).join('')}
+              `).join('')}
             </tbody>
           </table>
         </div>
-      \`
+      `
     }
     
     // ランキングから詳細分析へ遷移
@@ -5218,7 +4617,4 @@ app.get('/', (c) => {
   </script>
 </body>
 </html>
-  `)
-})
-
-export default app
+  

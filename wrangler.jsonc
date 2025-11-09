@@ -2,16 +2,5 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "stock-ai-predictor",
   "compatibility_date": "2024-01-01",
-  "pages_build_output_dir": "./dist",
-  "compatibility_flags": ["nodejs_compat"]
-  
-  // KV Namespace removed - using memory cache only for now
-  // Can be re-added later if needed
-  
-  // Environment variables (set in Cloudflare Pages Dashboard):
-  // - ML_API_URL: Google Cloud Run ML API endpoint (e.g., https://stock-ml-api-xxxxx-uc.a.run.app)
-  // - ALPHA_VANTAGE_API_KEY: Alpha Vantage API key
-  // - FINNHUB_API_KEY: Finnhub API key
-  // - OPENAI_API_KEY: OpenAI API key
-  // - FRED_API_KEY: FRED API key
+  "pages_build_output_dir": "./dist"
 }
